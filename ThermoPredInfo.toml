@@ -1,0 +1,11 @@
+[build-system] 
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ThermoPred"
+version= "0.0.1"
+dependencies = ["rdkit","numpy==1.25","morfeus", "xTB"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ThermoPred"]

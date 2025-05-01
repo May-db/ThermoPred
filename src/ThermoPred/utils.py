@@ -1,4 +1,4 @@
-from morfeus import read_xyz, Density
+from morfeus import read_xyz
 import subprocess
 import os
 

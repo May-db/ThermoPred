@@ -1,6 +1,9 @@
 from morfeus import read_xyz, Density
 import subprocess
 import os
+from rdkit import Chem
+from rdkit.Chem import AllChem
+import numpy as np
 
 def GeomOptxyz_Energy (molecule_path_xyz: str):
     #test that the file containing the 3D molecule does exist
@@ -42,3 +45,24 @@ def Energy_comparison (E_reagent1: float, E_reagent2: float, E_Prod:float):
     else: 
         print("the reaction is not thermodinamically stable at 0 K")
         return False
+    
+def smiles_to_3d(smiles, add_H=True, optimize=True):
+    mol=Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES string")
+    if add_H:
+        mol=Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, AllChem.ETKDG())  
+    if optimize:
+        AllChem.MMFFOptimizeMolecule(mol)
+    conf = mol.GetConformer()
+    elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
+    coordinates = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
+            
+    return elements, coordinates
+
+def write_xyz_file(elements, coordinates, filename):
+    with open(filename, 'w') as f:
+        f.write(f"{len(elements)}\n\n")
+        for element, coord in zip(elements, coordinates):
+            f.write(f"{element}{coord[0]:.6f}{coord[1]:.6f} {coord[2]:.6f}\n")

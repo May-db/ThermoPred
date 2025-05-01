@@ -4,6 +4,49 @@ import os
 from rdkit import Chem
 from rdkit.Chem import AllChem
 import numpy as np
+import streamlit as st
+from rdkit.Chem.Descriptors import ExactMolWt, MolLogP, NumHDonors, NumHAcceptors
+from stmol import showmol
+import py3Dmol
+from pathlib import Path
+import pandas as pd
+import os
+from streamlit_ketcher import st_ketcher
+from rdkit.Chem import rdFingerprintGenerator
+import mols2grid
+import streamlit.components.v1 as components
+import plotly.figure_factory as ff
+from typing import Tuple, List
+
+def generate_3D(smiles):
+    "Generate 3D coordinates from smiles"
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    mol = Chem.AddHs(mol)
+    params = AllChem.ETKDGv3()
+    params.randomSeed = 42
+    AllChem.EmbedMolecule(mol)
+    molstring= Chem.MolToMolBlock(mol)
+    return molstring
+
+def visualize_3D(molstring, title="Molecule"):
+    "Visualize the molecule in 3D using stmol"
+    w, h = 400, 400
+    xyzview = py3Dmol.view(width=w,height=w)
+    xyzview.addModel(molstring,'mol')
+    xyzview.setStyle({'sphere':{'colorscheme':'cyanCarbon', 'scale':0.25}, 'stick':{'colorscheme':'cyanCarbon'}})
+    xyzview.zoomTo()
+    xyzview.spin()
+    xyzview.setBackgroundColor('white')
+    with st.container():
+        st.markdown(f"### {title} :")
+        showmol(xyzview, height = w,width=w)
+
+
+
+
+
 
 def GeomOptxyz_Energy (molecule_path_xyz: str):
     #test that the file containing the 3D molecule does exist
@@ -66,3 +109,48 @@ def write_xyz_file(elements, coordinates, filename):
         f.write(f"{len(elements)}\n\n")
         for element, coord in zip(elements, coordinates):
             f.write(f"{element}{coord[0]:.6f}{coord[1]:.6f} {coord[2]:.6f}\n")
+
+st.title('Create your reaction')
+st.caption("Practical Proramming In Chemistry Project")
+st.markdown("Draw two molecules and see if the product is stable enough")
+
+
+# --- Gestion du reset ---
+if "mol1" not in st.session_state:
+    st.session_state.mol1 = ""
+if "mol2" not in st.session_state:
+    st.session_state.mol2 = ""
+
+
+# --- Draw Molecule 1 ---
+st.subheader("Draw Molecule 1")
+mol1 = st_ketcher(st.session_state.mol1, key="mol1_ketcher", height=400)
+if mol1:
+    st.session_state.mol1 = mol1
+    with st.expander("SMILES Molecule 1"):
+        st.code(mol1)
+    mol1_3D = generate_3D(mol1)
+    if mol1_3D:
+        with st.expander("Visualisation 3D Molécule 1", expanded=False):
+            visualize_3D(mol1_3D, title="Molécule 1")
+    
+# --- Draw Molecule 2 ---
+with st.container():
+    st.subheader("Draw Molecule 2")
+
+    if "show_mol2" not in st.session_state:
+        st.session_state.show_mol2 = False
+
+    if st.button("Start to draw molecule 2"):
+        st.session_state.show_mol2 = True
+
+    if st.session_state.show_mol2:
+        mol2 = st_ketcher(st.session_state.mol2, key="mol2_ketcher", height=400)
+        if mol2:
+            st.session_state.mol2 = mol2
+            with st.expander("SMILES Molecule 2"):
+                st.code(mol2)
+            mol2_3D = generate_3D(mol2)
+            if mol2_3D:
+                with st.expander("Visualisation 3D Molecule 2", expanded=False):
+                    visualize_3D(mol2_3D, title="Molecule 2")

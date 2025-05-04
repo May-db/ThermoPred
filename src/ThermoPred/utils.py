@@ -130,42 +130,42 @@ if "product" not in st.session_state:
 
 def draw_molecule(title, session_key, energy_value):
     """Draw a molecule, show SMILES, 3D and energy."""
-    st.subheader(f"Draw {title}")
-    mol_smiles = st_ketcher(st.session_state.get(session_key, ""), key=f"{session_key}_ketcher", height=400)
+    st.subheader(f"Draw {title}") #titre
+    mol_smiles = st_ketcher(st.session_state.get(session_key, ""), key=f"{session_key}_ketcher", height=400) #screen
     if mol_smiles:
         st.session_state[session_key] = mol_smiles
         with st.expander(f"SMILES {title}"):
-            st.code(mol_smiles)
+            st.code(mol_smiles) # Smiles in a box
         mol_3D = generate_3D(mol_smiles)
         if mol_3D:
             with st.expander(f"3D Visualization {title}", expanded=False):
-                visualize_3D(mol_3D)
+                visualize_3D(mol_3D) #3D molecule in a box
         with st.expander(f"Energy {title}"):
-            st.markdown(energy_value)
+            st.markdown(energy_value) #energy in a box
     return mol_smiles
 
-mol1 = draw_molecule("Molecule 1", "mol1", E_reagent1)
+mol1 = draw_molecule("Molecule 1", "mol1", E_reagent1) # draw molecule 1
 if mol1:
     if st.button("Start to draw molecule 2"):
-        st.session_state.show_mol2 = True
+        st.session_state.show_mol2 = True # push the button to start molecule 2
     if st.session_state.show_mol2:
-        mol2 = draw_molecule("Molecule 2", "mol2", E_reagent2)
+        mol2 = draw_molecule("Molecule 2", "mol2", E_reagent2) # draw molecule 2
 
 
 # Generated Product from Molecule 1 and Molecule 2
 if st.session_state.mol1 and st.session_state.mol2:
-    if st.button("Generate Product"):
+    if st.button("Generate Product"): #if the button is pushed
         st.subheader("Generated Product from Molecule 1 and Molecule 2")
         product_smiles = st.session_state.mol1 + "." + st.session_state.mol2  # mettre template ici c'était juste un exemple pour moi
-        product = st_ketcher(product_smiles, key="product_ketcher", height=400)
+        product = st_ketcher(product_smiles, key="product_ketcher", height=400) # écran
         with st.expander("SMILES Product"):
             st.code(product_smiles) #show the smile in a box
         product_3D = generate_3D(product_smiles)
         if product_3D:
             with st.expander("Visualisation 3D Product", expanded=False):
-                visualize_3D(product_3D) #show the 3D
+                visualize_3D(product_3D) #show the 3D in a box
         with st.expander("Energy Product"):
-            st.markdown(E_Prod)
+            st.markdown(E_Prod) # show the energy in a box
 
 
         result = Energy_comparison(E_reagent1, E_reagent2, E_Prod)
@@ -180,6 +180,7 @@ if st.session_state.mol1 and st.session_state.mol2:
 if st.button("Refresh Session State"):  
     st.session_state.mol1 = ""
     st.session_state.mol2 = ""
+    st.session_state.show_mol2 = ""
     st.session_state.product = ""
     st.write("Session has been reset. Please refresh the page (F5).")
     

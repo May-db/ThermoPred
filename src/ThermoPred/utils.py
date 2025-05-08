@@ -112,9 +112,9 @@ st.caption("Practical Proramming In Chemistry Project")
 st.markdown("Draw two molecules and see if the product is stable enough")
 
 # Exemple pour tester sur streamlit à enelever plus tard
-E_reagent1 = 150.0  
-E_reagent2 = 100.0  
-E_Prod = 200.0 
+#E_reagent1 = 150.0  
+#E_reagent2 = 100.0  
+#E_Prod = 200.0 
 
 # Reset management
 if "mol1" not in st.session_state:
@@ -140,42 +140,88 @@ def draw_molecule(title, session_key, energy_value):
         if mol_3D:
             with st.expander(f"3D Visualization {title}", expanded=False):
                 visualize_3D(mol_3D) #3D molecule in a box
+            try:
+                elements, coords = smiles_to_3d(mol_smiles)
+                temp_xyz = f"temp_{session_key}.xyz"
+                write_xyz_file(elements, coords, temp_xyz)
+                energy = GeomOptxyz_Energy(temp_xyz)
+                st.session_state[f"energy_{session_key}"] = energy
+                os.remove(temp_xyz)
+            except Exception as e:
+                st.error(f"Energy calculation failed: {str(e)}")
+                energy = None
+        
         with st.expander(f"Energy {title}"):
-            st.markdown(energy_value) #energy in a box
+            if f"energy_{session_key}" in st.session_state:
+                st.markdown(f"Energy: {st.session_state[f'energy_{session_key}']:.6f} Hartree")
+            else:
+                st.markdown("Energy not calculated yet")
+    
     return mol_smiles
 
-mol1 = draw_molecule("Molecule 1", "mol1", E_reagent1) # draw molecule 1
+
+
+
+mol1 = draw_molecule("Molecule 1", "mol1") # draw molecule 1
 if mol1:
     if st.button("Start to draw molecule 2"):
         st.session_state.show_mol2 = True # push the button to start molecule 2
     if st.session_state.show_mol2:
-        mol2 = draw_molecule("Molecule 2", "mol2", E_reagent2) # draw molecule 2
+        mol2 = draw_molecule("Molecule 2", "mol2") # draw molecule 2
 
 
 # Generated Product from Molecule 1 and Molecule 2
 if st.session_state.mol1 and st.session_state.mol2:
-    if st.button("Generate Product"): #if the button is pushed
+    if st.button("Generate Product"):
         st.subheader("Generated Product from Molecule 1 and Molecule 2")
-        product_smiles = st.session_state.mol1 + "." + st.session_state.mol2  # mettre template ici c'était juste un exemple pour moi
-        product = st_ketcher(product_smiles, key="product_ketcher", height=400) # écran
+        product_smiles = st.session_state.mol1 + "." + st.session_state.mol2
+        product = st_ketcher(product_smiles, key="product_ketcher", height=400)
+        
         with st.expander("SMILES Product"):
-            st.code(product_smiles) #show the smile in a box
+            st.code(product_smiles)
+            
         product_3D = generate_3D(product_smiles)
         if product_3D:
             with st.expander("Visualisation 3D Product", expanded=False):
-                visualize_3D(product_3D) #show the 3D in a box
+                visualize_3D(product_3D)
+                
+            # Calculate product energy
+            try:
+                elements, coords = smiles_to_3d(product_smiles)
+                temp_xyz = "temp_product.xyz"
+                write_xyz_file(elements, coords, temp_xyz)
+                E_Prod = GeomOptxyz_Energy(temp_xyz)
+                os.remove(temp_xyz)
+            except Exception as e:
+                st.error(f"Product energy calculation failed: {str(e)}")
+                E_Prod = None
+        
         with st.expander("Energy Product"):
-            st.markdown(E_Prod) # show the energy in a box
-
-
-        result = Energy_comparison(E_reagent1, E_reagent2, E_Prod)
-        if result is not None:
-            if result:
-                st.success("The reaction is thermodynamically stable at 0 K")
+            if E_Prod is not None:
+                st.markdown(f"Energy: {E_Prod:.6f} Hartree")
             else:
-                st.error("The reaction is not thermodynamically stable at 0 K")
+                st.markdown("Energy calculation failed")
+
+        # Perform energy comparison if all energies are available
+        if ('energy_mol1' in st.session_state and 
+            'energy_mol2' in st.session_state and 
+            E_Prod is not None):
+            
+            result = Energy_comparison(
+                st.session_state['energy_mol1'],
+                st.session_state['energy_mol2'],
+                E_Prod
+            )
+            
+            if result is not None:
+                if result:
+                    st.success("The reaction is thermodynamically stable at 0 K")
+                else:
+                    st.error("The reaction is not thermodynamically stable at 0 K")
+            else:
+                st.info("The reaction leads to a thermodynamic equilibrium at 0 K")
         else:
-            st.info("The reaction leads to a thermodynamic equilibrium at 0 K")
+            st.warning("Could not perform energy comparison - missing energy values")
 
 if st.button("Refresh Session State"):  
     st.session_state.mol1 = ""
@@ -183,6 +229,7 @@ if st.button("Refresh Session State"):
     st.session_state.show_mol2 = ""
     st.session_state.product = ""
     st.write("Session has been reset. Please refresh the page (F5).")
+    
     
 
 

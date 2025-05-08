@@ -44,11 +44,17 @@ def visualize_3D(molstring):
 
 def GeomOptxyz_Energy (molecule_path_xyz: str):
     #test that the file containing the 3D molecule does exist
+
     if not os.path.exists(molecule_path_xyz):
-        raise FileNotFoundError(f"{molecule_path_xyz} not found")
+        raise FileNotFoundError(f"Input file {molecule_path_xyz} not found")
     #does the geometry optimization
     xtb_cmd = ["xtb", molecule_path_xyz, "--opt"]
+    #result = subprocess.run(xtb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     #attributes the outputs of the previous command
+    #if result.returncode != 0:
+     #   print("xTB failed:")
+      #  print(result.stderr)
+       # raise RuntimeError(f"xTB optimization failed:\n{result.stderr}")
     output_xyz = "xtbopt.xyz"
     output_log = "xtb.out"
     atoms, coords = read_xyz("xtbopt.xyz")
@@ -59,6 +65,10 @@ def GeomOptxyz_Energy (molecule_path_xyz: str):
         print(result.stderr)
         raise RuntimeError("xTB optimization failed")
     #gets the energy in the output file (as it is automatically calculated with the optimization)
+    if not os.path.exists(output_xyz):
+        raise FileNotFoundError(f"{output_xyz} not found after xTB optimization")
+
+    
     energy_hartree = None
     with open(output_log, "r") as f:
         for line in f:
@@ -98,6 +108,8 @@ def smiles_to_3d(smiles, add_H=True, optimize=True):
             
     return elements, coordinates
 
+
+
 def write_xyz_file(elements, coordinates, filename):
     with open(filename, 'w') as f:
         f.write(f"{len(elements)}\n\n")
@@ -128,7 +140,7 @@ if "product" not in st.session_state:
 
 
 
-def draw_molecule(title, session_key, energy_value):
+def draw_molecule(title, session_key):
     """Draw a molecule, show SMILES, 3D and energy."""
     st.subheader(f"Draw {title}") #titre
     mol_smiles = st_ketcher(st.session_state.get(session_key, ""), key=f"{session_key}_ketcher", height=400) #screen
@@ -142,21 +154,29 @@ def draw_molecule(title, session_key, energy_value):
                 visualize_3D(mol_3D) #3D molecule in a box
             try:
                 elements, coords = smiles_to_3d(mol_smiles)
-                temp_xyz = f"temp_{session_key}.xyz"
-                write_xyz_file(elements, coords, temp_xyz)
-                energy = GeomOptxyz_Energy(temp_xyz)
+                xyz_filename=f"{session_key}.xyz"
+                write_xyz_file(elements, coords, xyz_filename)
+                with open(xyz_filename, "rb") as f:
+                    st.download_button(
+                        label=f"Download {title} .xyz file",
+                        data=f,
+                        file_name=xyz_filename,
+                        mime="chemical/x-xyz"
+                    )
+
+                energy = GeomOptxyz_Energy(xyz_filename)
                 st.session_state[f"energy_{session_key}"] = energy
-                os.remove(temp_xyz)
+
             except Exception as e:
                 st.error(f"Energy calculation failed: {str(e)}")
                 energy = None
-        
+
         with st.expander(f"Energy {title}"):
             if f"energy_{session_key}" in st.session_state:
                 st.markdown(f"Energy: {st.session_state[f'energy_{session_key}']:.6f} Hartree")
             else:
                 st.markdown("Energy not calculated yet")
-    
+
     return mol_smiles
 
 

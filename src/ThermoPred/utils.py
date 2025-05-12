@@ -1,46 +1,12 @@
 from morfeus import read_xyz
-import subprocess
-import os
+import numpy as np
+import pandas as pd
+from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem
-import numpy as np
-import streamlit as st
-from stmol import showmol
-import py3Dmol
-from streamlit_ketcher import st_ketcher
-
-
-def generate_3D(smiles):
-    "Generate 3D coordinates from smiles"
-    mol = Chem.MolFromSmiles(smiles) #convert smiles to an RDKit molecule object
-    if mol is None:
-        return None
-    mol = Chem.AddHs(mol) # add explicit hydrogens
-    params = AllChem.ETKDGv3() #use ETKDGv3 to generate 3D coordinates
-    params.randomSeed = 42 #reproducibility
-    AllChem.EmbedMolecule(mol) #generate 3D coordonates
-    molstring= Chem.MolToMolBlock(mol) #convert the 3D molecule to MolBlock format
-    return molstring
-
-
-def visualize_3D(molstring):
-    "Visualize the molecule in 3D using stmol and py3Dmol"
-    w, h = 400, 400  # Set width and height for the 3D viewer
-    xyzview = py3Dmol.view(width=w, height=h)  # Create a 3Dmol.js viewer object
-    xyzview.addModel(molstring, 'mol')  # Load the MolBlock string into the viewer as a molecule
-    # Set visual style: use spheres and sticks with a cyan color scheme
-    xyzview.setStyle({
-        'sphere': {'colorscheme': 'cyanCarbon', 'scale': 0.25},
-        'stick': {'colorscheme': 'cyanCarbon'}
-    })
-    xyzview.zoomTo()  # Adjust the camera to fit the molecule in view
-    xyzview.spin()  # Enable spinning animation
-    xyzview.setBackgroundColor('white')  # Set the background color of the viewer
-    with st.container():
-        showmol(xyzview, height=w, width=w)  # Render the 3D molecule in Streamlit
-
-
-
+from rxnutils.chem.reaction import ChemicalReaction
+import subprocess
+import os
 
 def GeomOptxyz_Energy (molecule_path_xyz: str):
     #test that the file containing the 3D molecule does exist

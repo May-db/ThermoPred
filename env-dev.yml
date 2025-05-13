@@ -1,0 +1,7 @@
+name: rxn-env
+channels:
+  - https://conda.anaconda.org/conda-forge
+  - defaults
+dependencies:
+  - python>=3.9,<3.13
+  - poetry>=1.2.0,<2.0

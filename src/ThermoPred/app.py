@@ -4,6 +4,9 @@ from stmol import showmol
 from streamlit_ketcher import st_ketcher
 import py3Dmol
 from pathlib import Path
+from rdkit import Chem
+
+# Import functions from the updated reaction_utils
 from reaction_utils import (
     generate_3D, 
     smiles_to_3d, 
@@ -11,8 +14,10 @@ from reaction_utils import (
     calculate_energy_with_rdkit, 
     Energy_comparison, 
     get_product,
-    predict_product_with_templates,
     get_main_product,
+    predict_reaction_with_templates,
+    normalize_smiles,
+    working_templates
 )
 
 # Set up the Streamlit page
@@ -59,14 +64,6 @@ def draw_and_process(title, session_key):
                 st.session_state[f"{session_key}_energy"] = energy
                 st.success(f"Energy (RDKit): {energy:.6f} Hartree")
                 
-                # Ajouter une visualisation de la structure optimisée
-                #with st.expander("Optimized 3D Structure"):
-                    #st.text("Optimized molecular geometry:")
-                    # Si vous avez une fonction pour visualiser les fichiers XYZ:
-                    # visualize_xyz(xyz_path)
-                    # Sinon, afficher le chemin du fichier
-                    #st.text(f"Saved to: {xyz_path}")
-                
             except Exception as e:
                 st.error(f"Energy calculation failed: {str(e)}")
                 import traceback
@@ -87,9 +84,11 @@ with col1:
 with col2:
     mol2 = draw_and_process("Molecule 2", "mol2")
 
-# Reaction type selection, du coup ca u lieu des datasets
-reaction_types = ["Auto-detect", "Substitution", "Addition", "Elimination", "Condensation"]
-selected_type = st.selectbox("Select reaction type (optional)", reaction_types)
+# Template selection dropdown
+template_names = list(working_templates.keys())
+template_names.insert(0, "Auto-detect")  # Add auto-detect option
+selected_template = st.selectbox("Select reaction template", template_names, 
+                               help="Choose a specific reaction template or let the system auto-detect")
 
 # Additional option to display only the main product
 show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
@@ -106,24 +105,45 @@ if mol1 and mol2:
     if predict_button:
         with st.spinner("Predicting product..."):
             try:
-                if selected_type == "Auto-detect":
-                    # Get product with or without leaving groups based on user preference
-                    full_product = get_product(None, mol1, mol2, return_main_product_only=False)
+                if selected_template == "Auto-detect":
+                    # Use the updated get_product function
+                    full_product = get_product(mol1, mol2, return_main_product_only=False)
+                    reaction_info = "Auto-detected"
                 else:
-                    rxn_type_map = {
-                        "Substitution": "substitution",
-                        "Addition": "addition",
-                        "Elimination": "elimination",
-                        "Condensation": "condensation"
-                    }
-                    rxn_type = rxn_type_map.get(selected_type, "default")
+                    # Use the specific template selected by the user
+                    reactants = f"{mol1}.{mol2}"
                     
-                    # Use the existing predict_product_with_templates function
-                    result = predict_product_with_templates(mol1, mol2)
-                    if isinstance(result, tuple) and len(result) == 2:
-                        full_product, _ = result
-                    else:
-                        full_product = result
+                    try:
+                        from rxnutils.chem.reaction import ChemicalReaction
+                        
+                        # Get the selected template
+                        template_smarts = working_templates[selected_template]
+                        
+                        # Create reaction from pattern
+                        rxn = ChemicalReaction(template_smarts)
+                        rxn.generate_reaction_template(radius=1)
+                        
+                        # Apply the template to predict products
+                        product_list = rxn.canonical_template.apply(reactants)
+                        
+                        # Flatten the product list
+                        products = []
+                        if product_list:
+                            for product_set in product_list:
+                                products.extend(product_set)
+                        
+                        if products:
+                            # Join products with dot notation
+                            full_product = ".".join(products)
+                            reaction_info = f"Template: {selected_template}"
+                        else:
+                            # Fallback to auto-detection if template doesn't match
+                            full_product = get_product(mol1, mol2, return_main_product_only=False)
+                            reaction_info = f"Template didn't match - fell back to auto-detection"
+                    except Exception as e:
+                        # Fallback to auto-detection if template application fails
+                        full_product = get_product(mol1, mol2, return_main_product_only=False)
+                        reaction_info = f"Template application failed - fell back to auto-detection"
                 
                 if full_product:
                     # Determine which product to display based on user preference
@@ -138,6 +158,7 @@ if mol1 and mol2:
                     # Show the selected product representation
                     st.subheader("Predicted Product")
                     st.code(display_product, language="chemical/x-smiles")
+                    st.caption(reaction_info)
                     
                     # Display full reaction if showing leaving groups
                     if show_leaving_groups and "." in full_product:
@@ -192,12 +213,20 @@ if mol1 and mol2:
                     st.error("Could not predict a product for these reactants.")
             except Exception as e:
                 st.error(f"Error predicting product: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     
     if reset_button:
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
+# Add a section to show available templates
+with st.expander("Available Reaction Templates"):
+    st.write("These are the reaction templates currently available in the system:")
+    for name, smarts in working_templates.items():
+        st.markdown(f"**{name}**: `{smarts}`")
+    st.info("The app will try to match your reactants against these templates. If none match, it will fall back to more generic reaction prediction methods.")
 
 with st.expander("About this app"):
     st.write("""
@@ -205,13 +234,18 @@ with st.expander("About this app"):
     
     **How it works:**
     1. Draw two molecules in the editors above
-    2. Select a reaction type (or let the app auto-detect)
+    2. Select a specific reaction template or let the app auto-detect the reaction
     3. Choose whether to show leaving groups (like HBr, H2O) in the product
     4. Click "Predict Product" to see the reaction product and energy analysis
-    5. The app uses RDKit and rxnutils for chemical predictions and xTB for energy calculations
+    5. The app uses RDKit and rxnutils with a template-based approach for chemical predictions
+    
+    **New Features:**
+    - Template-based reaction prediction for more accurate results
+    - Support for specific reaction types like SN2 substitutions and Williamson ether synthesis
+    - Ability to select specific reaction templates
     
     **Limitations:**
-    - Predictions are based on common reaction patterns and may not capture all possible reactions
+    - Predictions are based on reaction templates and may not capture all possible reactions
     - Energy calculations are approximate and use 0 K as the reference temperature
     - More complex reactions may not be predicted correctly
     """)

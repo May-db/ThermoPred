@@ -15,9 +15,12 @@ from reaction_utils import (
     Energy_comparison, 
     get_product,
     get_main_product,
-    predict_reaction_with_templates,
+    predict_reaction_products,
     normalize_smiles,
-    working_templates
+    working_templates,
+    is_halide,
+    is_alkyl_halide,
+    is_alcohol
 )
 
 # Set up the Streamlit page
@@ -84,6 +87,50 @@ with col1:
 with col2:
     mol2 = draw_and_process("Molecule 2", "mol2")
 
+# Display molecule types if identified
+if mol1 and mol2:
+    types_expander = st.expander("Molecule Types", expanded=False)
+    with types_expander:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Molecule 1:**")
+            mol_types = []
+            if is_alkyl_halide(mol1):
+                mol_types.append("Alkyl halide (C-X)")
+            elif is_halide(mol1):
+                mol_types.append("Contains halide (F, Cl, Br, I)")
+            if is_alcohol(mol1):
+                mol_types.append("Contains alcohol group (-OH)")
+            
+            if mol_types:
+                for t in mol_types:
+                    st.write(f"- {t}")
+            else:
+                st.write("- No specific functional groups identified")
+                
+        with col2:
+            st.write("**Molecule 2:**")
+            mol_types = []
+            if is_alkyl_halide(mol2):
+                mol_types.append("Alkyl halide (C-X)")
+            elif is_halide(mol2):
+                mol_types.append("Contains halide (F, Cl, Br, I)")
+            if is_alcohol(mol2):
+                mol_types.append("Contains alcohol group (-OH)")
+            
+            if mol_types:
+                for t in mol_types:
+                    st.write(f"- {t}")
+            else:
+                st.write("- No specific functional groups identified")
+                
+        # Suggest possible reactions
+        st.write("**Possible Reactions:**")
+        if is_alkyl_halide(mol1) and is_alkyl_halide(mol2):
+            st.write("- Alkyl-alkyl coupling (SN2 reaction)")
+        elif (is_alkyl_halide(mol1) and is_alcohol(mol2)) or (is_alkyl_halide(mol2) and is_alcohol(mol1)):
+            st.write("- Williamson ether synthesis likely")
+
 # Template selection dropdown
 template_names = list(working_templates.keys())
 template_names.insert(0, "Auto-detect")  # Add auto-detect option
@@ -106,7 +153,7 @@ if mol1 and mol2:
         with st.spinner("Predicting product..."):
             try:
                 if selected_template == "Auto-detect":
-                    # Use the updated get_product function
+                    # Use the general product prediction function
                     full_product = get_product(mol1, mol2, return_main_product_only=False)
                     reaction_info = "Auto-detected"
                 else:
@@ -146,6 +193,9 @@ if mol1 and mol2:
                         reaction_info = f"Template application failed - fell back to auto-detection"
                 
                 if full_product:
+                    # Log the template matches for debugging
+                    st.session_state['template_matches'] = predict_reaction_products(mol1, mol2)
+                    
                     # Determine which product to display based on user preference
                     if not show_leaving_groups and "." in full_product:
                         display_product = get_main_product(full_product)
@@ -169,6 +219,15 @@ if mol1 and mol2:
                             if len(components) > 1:
                                 st.markdown(f"**Main product**: {components[0]}")
                                 st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
+                    
+                    # Show matching templates for debugging
+                    with st.expander("Matching Reaction Templates"):
+                        if 'template_matches' in st.session_state and st.session_state['template_matches']:
+                            st.write("These templates successfully matched your reactants:")
+                            for template, products in st.session_state['template_matches'].items():
+                                st.markdown(f"- **{template}**: `{products if isinstance(products, str) else ', '.join(products)}`")
+                        else:
+                            st.write("No templates matched directly. Using specialized alkyl coupling handler.")
                     
                     # Generate 3D visualization for the display product
                     molblock = generate_3D(display_product)
@@ -239,11 +298,11 @@ with st.expander("About this app"):
     4. Click "Predict Product" to see the reaction product and energy analysis
     5. The app uses RDKit and rxnutils with a template-based approach for chemical predictions
     
-    **New Features:**
-    - Template-based reaction prediction for more accurate results
-    - Support for specific reaction types like SN2 substitutions and Williamson ether synthesis
-    - Ability to select specific reaction templates
-    
+    **Features:**
+    - Template-based reaction prediction for accurate results
+    - Special handling for alkyl halide coupling reactions
+    - Support for specific reaction types like SN2 substitutions
+    - Energy calculations using RDKit force fields
     **Limitations:**
     - Predictions are based on reaction templates and may not capture all possible reactions
     - Energy calculations are approximate and use 0 K as the reference temperature

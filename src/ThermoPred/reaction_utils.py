@@ -155,7 +155,7 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
 
 def Energy_comparison(E1, E2, Ep):
     delta_E = E1 + E2 - Ep
-    if delta_E > 0:
+    if delta_E < 0:
         return "stable"
     elif delta_E == 0:
         return "equilibrium"

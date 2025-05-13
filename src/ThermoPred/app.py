@@ -8,11 +8,11 @@ from reaction_utils import (
     generate_3D, 
     smiles_to_3d, 
     write_xyz_file, 
-    GeomOptxyz_Energy, 
+    calculate_energy_with_rdkit, 
     Energy_comparison, 
     get_product,
     predict_product_with_templates,
-    get_main_product
+    get_main_product,
 )
 
 # Set up the Streamlit page
@@ -47,14 +47,30 @@ def draw_and_process(title, session_key):
                 visualize_3D(molblock)
             
             try:
-                elements, coords = smiles_to_3d(smiles)
-                xyz_path = f"xyz_files/{session_key}.xyz"
+                st.info("Calculating energy with RDKit MMFF94/UFF...")
+                
+                energy, elements, coords = calculate_energy_with_rdkit(smiles)
+                
+                # register the optimized geometry
+                os.makedirs("xyz_files", exist_ok=True)
+                xyz_path = os.path.abspath(f"xyz_files/{session_key}_optimized.xyz")
                 write_xyz_file(elements, coords, xyz_path)
-                energy = GeomOptxyz_Energy(xyz_path)
+                
                 st.session_state[f"{session_key}_energy"] = energy
-                st.success(f"Energy: {energy:.6f} Hartree")
+                st.success(f"Energy (RDKit): {energy:.6f} Hartree")
+                
+                # Ajouter une visualisation de la structure optimisée
+                #with st.expander("Optimized 3D Structure"):
+                    #st.text("Optimized molecular geometry:")
+                    # Si vous avez une fonction pour visualiser les fichiers XYZ:
+                    # visualize_xyz(xyz_path)
+                    # Sinon, afficher le chemin du fichier
+                    #st.text(f"Saved to: {xyz_path}")
+                
             except Exception as e:
-                st.error(f"Energy calculation failed: {e}")
+                st.error(f"Energy calculation failed: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
     
     return smiles
 
@@ -141,10 +157,9 @@ if mol1 and mol2:
                         
                         try:
                             # Always use the main product for energy calculations
-                            elements, coords = smiles_to_3d(energy_product)
+                            E_prod, elements, coords = calculate_energy_with_rdkit(energy_product)
                             xyz_path = "xyz_files/product.xyz"
                             write_xyz_file(elements, coords, xyz_path)
-                            E_prod = GeomOptxyz_Energy(xyz_path)
                             st.success(f"Product Energy: {E_prod:.6f} Hartree")
                             
                             if "mol1_energy" in st.session_state and "mol2_energy" in st.session_state:

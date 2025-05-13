@@ -23,7 +23,7 @@ def generate_3D(smiles):
     return molblock
 
 
-def smiles_to_3d(smiles, add_H=True, optimize=True):
+def smiles_to_3d(smiles, add_H=True, optimize=True, max_attempts=3):
     if "." in smiles:
         smiles = get_main_product(smiles)
         
@@ -32,9 +32,31 @@ def smiles_to_3d(smiles, add_H=True, optimize=True):
         raise ValueError("Invalid SMILES string")
     if add_H:
         mol = Chem.AddHs(mol)
+
+        params = AllChem.ETKDGv3()
+        params.useRandomCoords = True
+        params.randomSeed = 42
+        params.numThreads = 1 
         AllChem.EmbedMolecule(mol, AllChem.ETKDG())
     if optimize:
         AllChem.MMFFOptimizeMolecule(mol)
+        success = False
+        for attempt in range(max_attempts):
+            try:
+                # Essayer d'intégrer la molécule
+                AllChem.EmbedMolecule(mol, params)
+                if mol.GetNumConformers() > 0:
+                # Optimiser avec MMFF si demandé
+                    if optimize:
+                        AllChem.MMFFOptimizeMolecule(mol)
+                    success = True
+                    break
+            except Exception as e:
+                if attempt == max_attempts - 1:
+                    raise ValueError(f"Failed to generate 3D coordinates after {max_attempts} attempts: {str(e)}")
+    
+        if not success:
+            raise ValueError("Failed to generate reasonable 3D coordinates")
 
     conf = mol.GetConformer()
     elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
@@ -50,31 +72,86 @@ def write_xyz_file(elements, coordinates, filename):
             f.write(f"{element} {coord[0]:.6f} {coord[1]:.6f} {coord[2]:.6f}\n")
 
 
-def GeomOptxyz_Energy(xyz_path):
-    if not os.path.exists(xyz_path):
-        raise FileNotFoundError(f"{xyz_path} not found")
-
-    xtb_cmd = ["xtb", xyz_path, "--opt"]
-    result = subprocess.run(xtb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError("xTB optimization failed")
-
-    output_xyz = "xtbopt.xyz"
-    output_log = "xtb.out"
-
-    if not os.path.exists(output_xyz):
-        raise FileNotFoundError("Optimization did not produce output xyz file")
-
-    energy_hartree = None
-    with open(output_log, "r") as f:
-        for line in f:
-            if "TOTAL ENERGY" in line:
-                energy_hartree = float(line.strip().split()[-2])
-                break
-
-    return energy_hartree
-
+def calculate_energy_with_rdkit(smiles, optimize_steps=500):
+    """Calcule l'énergie d'une molécule en utilisant RDKit au lieu de xTB"""
+    try:
+        # Nettoyer le SMILES
+        if "." in smiles:
+            smiles = smiles.split(".")[0]  # Prendre seulement la première molécule
+        
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Impossible de lire le SMILES: {smiles}")
+        
+        mol = Chem.AddHs(mol)
+        
+        # generate a clean 3D molecule
+        params = AllChem.ETKDGv3()
+        params.useRandomCoords = True
+        params.randomSeed = 42
+        params.maxIterations = 1000  
+        AllChem.EmbedMultipleConfs(mol, numConfs=10, params=params)
+        
+        if mol.GetNumConformers() == 0:
+            raise ValueError("Échec de génération des coordonnées 3D")
+        
+        # all conformation are optimized in order to take the smallest value later on
+        energies = []
+        for conf_id in range(mol.GetNumConformers()):
+            try:
+                # setting the MMFF94 field
+                mp = AllChem.MMFFGetMoleculeProperties(mol, mmffVariant='MMFF94s')
+                if mp is None:
+                    continue
+                
+                ff = AllChem.MMFFGetMoleculeForceField(mol, mp, confId=conf_id)
+                if ff is None:
+                    continue
+                
+                # Optimization
+                ff.Initialize()
+                result = ff.Minimize(maxIts=optimize_steps)
+                
+                # Energie calculus
+                energy = ff.CalcEnergy()
+                energies.append((conf_id, energy))
+            except Exception as e:
+                continue
+        
+        if not energies:
+            # UFF method as backup
+            for conf_id in range(mol.GetNumConformers()):
+                try:
+                    ff = AllChem.UFFGetMoleculeForceField(mol, confId=conf_id)
+                    if ff is None:
+                        continue
+                    
+                    ff.Initialize()
+                    result = ff.Minimize(maxIts=optimize_steps)
+                    energy = ff.CalcEnergy()
+                    energies.append((conf_id, energy))
+                except Exception as e:
+                    continue
+        
+        if not energies:
+            raise ValueError("Impossible de calculer l'énergie avec MMFF94 ou UFF")
+        
+        # takes the lowest energy
+        energies.sort(key=lambda x: x[1])
+        best_conf_id, lowest_energy = energies[0]
+        
+        # Hartree conversion
+        energy_hartree = lowest_energy / 627.5  # 1 Hartree ≈ 627.5 kcal/mol
+        
+        # creation of a xyz file in case
+        conf = mol.GetConformer(best_conf_id)
+        elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
+        coordinates = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
+        
+        return energy_hartree , elements, coordinates
+    
+    except Exception as e:
+        raise ValueError(f"Erreur lors du calcul de l'énergie: {str(e)}")
 
 def Energy_comparison(E1, E2, Ep):
     delta_E = E1 + E2 - Ep

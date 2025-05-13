@@ -11,7 +11,8 @@ from reaction_utils import (
     GeomOptxyz_Energy, 
     Energy_comparison, 
     get_product,
-    predict_product_with_templates
+    predict_product_with_templates,
+    get_main_product
 )
 
 # Set up the Streamlit page
@@ -74,6 +75,10 @@ with col2:
 reaction_types = ["Auto-detect", "Substitution", "Addition", "Elimination", "Condensation"]
 selected_type = st.selectbox("Select reaction type (optional)", reaction_types)
 
+# Additional option to display only the main product
+show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
+                                 help="When checked, the product will include leaving groups like HBr, H2O, etc.")
+
 # Predict product button
 if mol1 and mol2:
     predict_col, reset_col = st.columns([2, 1])
@@ -86,7 +91,8 @@ if mol1 and mol2:
         with st.spinner("Predicting product..."):
             try:
                 if selected_type == "Auto-detect":
-                    product = get_product(None, mol1, mol2)
+                    # Get product with or without leaving groups based on user preference
+                    full_product = get_product(None, mol1, mol2, return_main_product_only=False)
                 else:
                     rxn_type_map = {
                         "Substitution": "substitution",
@@ -95,19 +101,47 @@ if mol1 and mol2:
                         "Condensation": "condensation"
                     }
                     rxn_type = rxn_type_map.get(selected_type, "default")
-                    product, _ = predict_product_with_templates(mol1, mol2)
-                
-                if product:
-                    st.subheader("Predicted Product")
-                    st.code(product, language="chemical/x-smiles")
                     
-                    molblock = generate_3D(product)
+                    # Use the existing predict_product_with_templates function
+                    result = predict_product_with_templates(mol1, mol2)
+                    if isinstance(result, tuple) and len(result) == 2:
+                        full_product, _ = result
+                    else:
+                        full_product = result
+                
+                if full_product:
+                    # Determine which product to display based on user preference
+                    if not show_leaving_groups and "." in full_product:
+                        display_product = get_main_product(full_product)
+                    else:
+                        display_product = full_product
+                    
+                    # For energy calculations, always use the main product
+                    energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    
+                    # Show the selected product representation
+                    st.subheader("Predicted Product")
+                    st.code(display_product, language="chemical/x-smiles")
+                    
+                    # Display full reaction if showing leaving groups
+                    if show_leaving_groups and "." in full_product:
+                        with st.expander("Full Reaction"):
+                            st.markdown(f"**Reactants**: {mol1} + {mol2}")
+                            st.markdown(f"**Products**: {full_product}")
+                            components = full_product.split(".")
+                            if len(components) > 1:
+                                st.markdown(f"**Main product**: {components[0]}")
+                                st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
+                    
+                    # Generate 3D visualization for the display product
+                    molblock = generate_3D(display_product)
                     if molblock:
                         with st.expander("3D Product View"):
                             visualize_3D(molblock)
                         
                         try:
-                            elements, coords = smiles_to_3d(product)
+                            # Always use the main product for energy calculations
+                            elements, coords = smiles_to_3d(energy_product)
                             xyz_path = "xyz_files/product.xyz"
                             write_xyz_file(elements, coords, xyz_path)
                             E_prod = GeomOptxyz_Energy(xyz_path)
@@ -157,8 +191,9 @@ with st.expander("About this app"):
     **How it works:**
     1. Draw two molecules in the editors above
     2. Select a reaction type (or let the app auto-detect)
-    3. Click "Predict Product" to see the reaction product and energy analysis
-    4. The app uses RDKit and rxnutils for chemical predictions and xTB for energy calculations
+    3. Choose whether to show leaving groups (like HBr, H2O) in the product
+    4. Click "Predict Product" to see the reaction product and energy analysis
+    5. The app uses RDKit and rxnutils for chemical predictions and xTB for energy calculations
     
     **Limitations:**
     - Predictions are based on common reaction patterns and may not capture all possible reactions

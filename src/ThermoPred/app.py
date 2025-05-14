@@ -37,6 +37,7 @@ def visualize_3D(molblock):
     view.addModel(molblock, 'mol')
     view.setStyle({'stick': {}, 'sphere': {'scale': 0.25}})
     view.zoomTo()
+    view.spin()
     view.setBackgroundColor('white')
     showmol(view, height=400, width=400)
 
@@ -47,15 +48,17 @@ def draw_and_process(title, session_key):
     
     if smiles:
         st.session_state[session_key] = smiles
-        st.code(smiles, language="chemical/x-smiles")
+        with st.expander(f"SMILES"):
+            st.code(smiles)
         
         molblock = generate_3D(smiles)
         if molblock:
-            with st.expander("3D View"):
+            with st.expander("3D Visualization"):
                 visualize_3D(molblock)
             
             try:
-                st.info("Calculating energy with RDKit MMFF94/UFF...")
+                #with st.expander("Energy"):
+                #st.info("Calculating energy with RDKit MMFF94/UFF...")
                 
                 energy, elements, coords = calculate_energy_with_rdkit(smiles)
                 
@@ -65,7 +68,8 @@ def draw_and_process(title, session_key):
                 write_xyz_file(elements, coords, xyz_path)
                 
                 st.session_state[f"{session_key}_energy"] = energy
-                st.success(f"Energy (RDKit): {energy:.6f} Hartree")
+                with st.expander("Energy"):
+                    st.success(f"Energy (RDKit): {energy:.6f} Hartree")
                 
             except Exception as e:
                 st.error(f"Energy calculation failed: {str(e)}")
@@ -86,6 +90,9 @@ with col1:
     mol1 = draw_and_process("Molecule 1", "mol1")
 with col2:
     mol2 = draw_and_process("Molecule 2", "mol2")
+
+#mol1 = draw_and_process("Molecule 1", "mol1")
+#mol2 = draw_and_process("Molecule 2", "mol2")
 
 # Display molecule types if identified
 if mol1 and mol2:
@@ -207,7 +214,8 @@ if mol1 and mol2:
                     
                     # Show the selected product representation
                     st.subheader("Predicted Product")
-                    st.code(display_product, language="chemical/x-smiles")
+                    with st.expander("SMILES"):
+                        st.code(display_product)
                     st.caption(reaction_info)
                     
                     # Display full reaction if showing leaving groups

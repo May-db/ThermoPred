@@ -81,14 +81,13 @@ if "mol2" not in st.session_state:
     st.session_state.mol2 = ""
 
 
-col1, col2 = st.columns(2)
-with col1:
-    mol1 = draw_and_process("Molecule 1", "mol1")
-with col2:
-    mol2 = draw_and_process("Molecule 2", "mol2")
+
+mol1 = draw_and_process("Molecule 1", "mol1")
+mol2 = draw_and_process("Molecule 2", "mol2")
 
 # Display molecule types if identified
 if mol1 and mol2:
+    st.subheader("Reaction")
     types_expander = st.expander("Molecule Types", expanded=False)
     with types_expander:
         col1, col2 = st.columns(2)
@@ -246,7 +245,7 @@ if mol1 and mol2:
                             if len(components) > 1:
                                 st.markdown(f"**Main product**: {components[0]}")
                                 st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
-                    
+                            
                     # Show matching templates for debugging
                     with st.expander("Matching Reaction Templates"):
                         if 'template_matches' in st.session_state and st.session_state['template_matches']:
@@ -267,7 +266,8 @@ if mol1 and mol2:
                             E_prod, elements, coords = calculate_energy_with_rdkit(energy_product)
                             xyz_path = "xyz_files/product.xyz"
                             write_xyz_file(elements, coords, xyz_path)
-                            st.success(f"Product Energy: {E_prod:.6f} Hartree")
+                            with st.expander("Energy"):
+                                st.success(f"Product Energy: {E_prod:.6f} Hartree")
                             
                             if "mol1_energy" in st.session_state and "mol2_energy" in st.session_state:
                                 result = Energy_comparison(

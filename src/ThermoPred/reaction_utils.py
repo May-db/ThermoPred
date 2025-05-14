@@ -1,13 +1,33 @@
-import os
-import numpy as np
-import pandas as pd
-from pathlib import Path
+from rxnutils.chem.reaction import ChemicalReaction
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from rxnutils.chem.reaction import ChemicalReaction
-import subprocess
+import os
+import numpy as np
 
+# Define a set of reaction patterns that work
+working_templates = {
+    # Sulfonyl chloride substitution (confirmed working)
+    "sulfonyl_substitution": "Cl[S:3]([CH2:2][CH3:1])(=[O:4])=[O:5].[OH:6][CH2:7][CH2:8][Br:9]>>[CH3:1][CH2:2][S:3](=[O:4])(=[O:5])[O:6][CH2:7][CH2:8][Br:9]",
+    
+    # SN2 with specific leaving groups and nucleophiles (confirmed working)
+    "sn2_bromide_oh": "[CH3:1][Br:2].[OH:3][H:4]>>[CH3:1][OH:3].[Br:2][H:4]",
+    "sn2_bromide_oh_2": "[C:1][Br:2].[O:3][H:4]>>[C:1][O:3].[Br:2][H:4]",  # More general version
+    
+    # Additional SN2 templates with valid atom mappings
+    "sn2_chloride_oh": "[CH3:1][Cl:2].[OH:3][H:4]>>[CH3:1][OH:3].[Cl:2][H:4]",
+    "sn2_chloride_oh_2": "[C:1][Cl:2].[O:3][H:4]>>[C:1][O:3].[Cl:2][H:4]",  # More general version
+    "sn2_iodide_oh": "[CH3:1][I:2].[OH:3][H:4]>>[CH3:1][OH:3].[I:2][H:4]",
+    "sn2_iodide_oh_2": "[C:1][I:2].[O:3][H:4]>>[C:1][O:3].[I:2][H:4]",  # More general version
+    
+    # SN2 with different nucleophiles
+    "sn2_bromide_nh2": "[CH3:1][Br:2].[NH2:3][H:4]>>[CH3:1][NH2:3].[Br:2][H:4]",
+    "sn2_bromide_sh": "[CH3:1][Br:2].[SH:3][H:4]>>[CH3:1][SH:3].[Br:2][H:4]",
+    
+    # Alkyl halide coupling
+    "alkyl_coupling": "[C:1][Cl:2].[C:3][Br:4]>>[C:1][C:3].[Cl:2][Br:4]"
+}
 
+# Utility functions
 def generate_3D(smiles):
     if "." in smiles:
         smiles = get_main_product(smiles)
@@ -43,10 +63,10 @@ def smiles_to_3d(smiles, add_H=True, optimize=True, max_attempts=3):
         success = False
         for attempt in range(max_attempts):
             try:
-                # Essayer d'intégrer la molécule
+                # Trying to embed the molecule
                 AllChem.EmbedMolecule(mol, params)
                 if mol.GetNumConformers() > 0:
-                # Optimiser avec MMFF si demandé
+                # Optimize with MMFF if requested
                     if optimize:
                         AllChem.MMFFOptimizeMolecule(mol)
                     success = True
@@ -73,19 +93,19 @@ def write_xyz_file(elements, coordinates, filename):
 
 
 def calculate_energy_with_rdkit(smiles, optimize_steps=500):
-    """Calcule l'énergie d'une molécule en utilisant RDKit au lieu de xTB"""
+    """Calculate a molecule's energy using RDKit instead of xTB"""
     try:
-        # Nettoyer le SMILES
+        # Clean the SMILES
         if "." in smiles:
-            smiles = smiles.split(".")[0]  # Prendre seulement la première molécule
+            smiles = smiles.split(".")[0]  # Take only the first molecule
         
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            raise ValueError(f"Impossible de lire le SMILES: {smiles}")
+            raise ValueError(f"Cannot read SMILES: {smiles}")
         
         mol = Chem.AddHs(mol)
         
-        # generate a clean 3D molecule
+        # Generate a clean 3D molecule
         params = AllChem.ETKDGv3()
         params.useRandomCoords = True
         params.randomSeed = 42
@@ -93,13 +113,13 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
         AllChem.EmbedMultipleConfs(mol, numConfs=10, params=params)
         
         if mol.GetNumConformers() == 0:
-            raise ValueError("Échec de génération des coordonnées 3D")
+            raise ValueError("Failed to generate 3D coordinates")
         
-        # all conformation are optimized in order to take the smallest value later on
+        # All conformations are optimized to take the lowest energy later
         energies = []
         for conf_id in range(mol.GetNumConformers()):
             try:
-                # setting the MMFF94 field
+                # Setting up the MMFF94 field
                 mp = AllChem.MMFFGetMoleculeProperties(mol, mmffVariant='MMFF94s')
                 if mp is None:
                     continue
@@ -112,7 +132,7 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
                 ff.Initialize()
                 result = ff.Minimize(maxIts=optimize_steps)
                 
-                # Energie calculus
+                # Energy calculation
                 energy = ff.CalcEnergy()
                 energies.append((conf_id, energy))
             except Exception as e:
@@ -134,24 +154,24 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
                     continue
         
         if not energies:
-            raise ValueError("Impossible de calculer l'énergie avec MMFF94 ou UFF")
+            raise ValueError("Cannot calculate energy with MMFF94 or UFF")
         
-        # takes the lowest energy
+        # Take the lowest energy
         energies.sort(key=lambda x: x[1])
         best_conf_id, lowest_energy = energies[0]
         
-        # Hartree conversion
+        # Convert to Hartree
         energy_hartree = lowest_energy / 627.5  # 1 Hartree ≈ 627.5 kcal/mol
         
-        # creation of a xyz file in case
+        # Create xyz data
         conf = mol.GetConformer(best_conf_id)
         elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
         coordinates = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
         
-        return energy_hartree , elements, coordinates
+        return energy_hartree, elements, coordinates
     
     except Exception as e:
-        raise ValueError(f"Erreur lors du calcul de l'énergie: {str(e)}")
+        raise ValueError(f"Error calculating energy: {str(e)}")
 
 def Energy_comparison(E1, E2, Ep):
     delta_E = E1 + E2 - Ep
@@ -174,7 +194,6 @@ def normalize_smiles(smiles):
 
 
 def get_main_product(product_smiles):
-    
     if product_smiles is None:
         return None
         
@@ -199,6 +218,30 @@ def get_main_product(product_smiles):
     return largest_component
 
 
+def is_halide(smiles):
+    """Check if a molecule contains a halide (F, Cl, Br, I)."""
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return False
+    
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() in ['F', 'Cl', 'Br', 'I']:
+            return True
+    
+    return False
+
+
+def is_alkyl_halide(smiles):
+    """Check if a SMILES string represents an alkyl halide."""
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return False
+    
+    # Check for C-X bond (X = F, Cl, Br, I)
+    cx_pattern = Chem.MolFromSmarts("[CX4][F,Cl,Br,I]")
+    return mol.HasSubstructMatch(cx_pattern)
+
+
 def is_alcohol(smiles):
     """Check if a SMILES string represents an alcohol."""
     mol = Chem.MolFromSmiles(smiles)
@@ -209,252 +252,266 @@ def is_alcohol(smiles):
     return mol.HasSubstructMatch(oh_pattern)
 
 
-def is_alkyl_halide(smiles):
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
+def predict_sn2_with_hydroxide(alkyl_halide, hydroxide):
+    """Specialized function to predict SN2 reactions with hydroxide."""
+    # Find the halogen
+    halogen = None
+    for h in ['F', 'Cl', 'Br', 'I']:
+        if h in alkyl_halide:
+            halogen = h
+            break
     
-    # Check for C-X bond (X = F, Cl, Br, I)
-    cx_pattern = Chem.MolFromSmarts("[CX4][F,Cl,Br,I]")
-    return mol.HasSubstructMatch(cx_pattern)
-
-
-def find_alcohol_and_halide(reactant1, reactant2):
-    r1_is_alcohol = is_alcohol(reactant1)
-    r1_is_halide = is_alkyl_halide(reactant1)
-    r2_is_alcohol = is_alcohol(reactant2)
-    r2_is_halide = is_alkyl_halide(reactant2)
-    
-    if r1_is_alcohol and r2_is_halide:
-        return reactant1, reactant2
-    elif r2_is_alcohol and r1_is_halide:
-        return reactant2, reactant1
-    else:
-        return None, None
-
-
-def handle_williamson_ether_synthesis(alcohol, halide):
-    try:
-        halogen = None
-        for element in ["Br", "Cl", "I", "F"]:
-            if element in halide:
-                halogen = element
-                break
+    if halogen:
+        # Replace the halogen with OH
+        alkyl_group = alkyl_halide.replace(halogen, "")
+        alcohol_product = alkyl_group + "O"
         
-        if halogen is None:
-            return None
-        
-        alcohol_mol = Chem.MolFromSmiles(alcohol)
-        halide_mol = Chem.MolFromSmiles(halide)
-        
-        if alcohol_mol is None or halide_mol is None:
-            return None
-        
-        oh_matches = alcohol_mol.GetSubstructMatches(Chem.MolFromSmarts("[OX2H]"))
-        
-        cx_matches = halide_mol.GetSubstructMatches(Chem.MolFromSmarts(f"[C][{halogen}]"))
-        
-        if not oh_matches or not cx_matches:
-            return None
-        
-        o_idx = oh_matches[0][0]
-        c_idx_in_halide = cx_matches[0][0]
-        
-        new_alcohol = Chem.Mol(alcohol_mol)
-        new_halide = Chem.Mol(halide_mol)
-        
-        new_alcohol = Chem.DeleteSubstructs(new_alcohol, Chem.MolFromSmarts("[OX2H]-[H]"))
-        
-        halide_without_x = Chem.DeleteSubstructs(new_halide, Chem.MolFromSmarts(f"[{halogen}]"))
-        
-        r_group_smiles = Chem.MolToSmiles(halide_without_x)
-        
-        ether_smiles = alcohol.replace("O", f"O{r_group_smiles}")
-        
-        if halogen == "Br":
-            leaving_group = "Br"
-        elif halogen == "Cl":
-            leaving_group = "Cl"
-        elif halogen == "I":
-            leaving_group = "I"
-        else:
-            leaving_group = "F"
-        
-        return f"{ether_smiles}.{leaving_group}"
-    except Exception as e:
-        print(f"Error in handle_williamson_ether_synthesis: {e}")
-        return None
-
-
-def predict_reaction(reactant1_smiles, reactant2_smiles, reaction_type="default"):
-    if reaction_type == "substitution":
-        alcohol, halide = find_alcohol_and_halide(reactant1_smiles, reactant2_smiles)
-        
-        if alcohol and halide:
-            return handle_williamson_ether_synthesis(alcohol, halide)
-    
-    reaction_patterns = {
-        "default": "[*:1][*:2].[*:3][*:4]>>[*:1][*:3].[*:2][*:4]",
-        "addition": "[C:1]=[C:2].[*:3][*:4]>>[*:3][C:1]-[C:2][*:4]",
-        "elimination": "[*:1][C:2]-[C:3][*:4]>>[*:1][C:2]=[C:3][*:4]",
-        "condensation": "[*:1][OH:5].[HO:6][*:2]>>[*:1][*:2].[OH2:5,6]",
-    }
-    
-    rxn_smarts = reaction_patterns.get(reaction_type, reaction_patterns["default"])
-    
-    try:
-        rxn = ChemicalReaction(rxn_smarts)
-        products = rxn.run_reaction([reactant1_smiles, reactant2_smiles])
-        if products and len(products) > 0:
-            return products[0]
-    except Exception as e:
-        print(f"rxnutils reaction failed: {e}")
-    
-    try:
-        rxn = AllChem.ReactionFromSmarts(rxn_smarts)
-        
-        reactant1 = Chem.MolFromSmiles(reactant1_smiles)
-        reactant2 = Chem.MolFromSmiles(reactant2_smiles)
-        
-        if reactant1 is None or reactant2 is None:
-            return None
-        
-        products = rxn.RunReactants((reactant1, reactant2))
-        
-        if products and len(products) > 0 and len(products[0]) > 0:
-            product_mol = products[0][0]
-            try:
-                Chem.SanitizeMol(product_mol)
-                return Chem.MolToSmiles(product_mol)
-            except:
-                return None
-    except Exception as e:
-        print(f"RDKit reaction failed: {e}")
+        # Check if the product is valid
+        mol = Chem.MolFromSmiles(alcohol_product)
+        if mol:
+            return f"{alcohol_product}.{halogen}"
     
     return None
 
 
-def predict_product_with_templates(reactant1, reactant2):
-    alcohol, halide = find_alcohol_and_halide(reactant1, reactant2)
-    if alcohol and halide:
-        product = handle_williamson_ether_synthesis(alcohol, halide)
-        if product:
-            return product, "substitution"
+def predict_reaction_products(reactant1, reactant2):
+    """
+    Predict the products of a reaction between two reactants using working templates.
     
-    reaction_types = ["substitution", "addition", "elimination", "condensation", "default"]
+    Args:
+        reactant1 (str): SMILES of first reactant
+        reactant2 (str): SMILES of second reactant
     
-    for rxn_type in reaction_types:
-        product = predict_reaction(reactant1, reactant2, rxn_type)
-        if product:
-            return product, rxn_type
+    Returns:
+        dict: Dictionary of {reaction_type: predicted_products}
+    """
+    # Check if one is an alkyl halide and the other is hydroxide
+    r1_is_alkyl_halide = is_alkyl_halide(reactant1)
+    r2_is_alkyl_halide = is_alkyl_halide(reactant2)
     
-    return attempt_generic_reaction(reactant1, reactant2)
-
-
-def attempt_generic_reaction(reactant1, reactant2):
-    """Attempt to predict a reaction product using generic approaches."""
-    try:
-        # Try using rxnutils for generic reactions
-        # General coupling reaction
-        coupling_rxn = ChemicalReaction("[*:1]~[*:2].[*:3]~[*:4]>>[*:1]~[*:2]-[*:3]~[*:4]")
-        products = coupling_rxn.run_reaction([reactant1, reactant2])
-        if products and len(products) > 0:
-            return products[0], "coupling"
+    # Simple check for hydroxide
+    r1_is_hydroxide = reactant1 == "O" or reactant1 == "[OH-]" or reactant1 == "OH"
+    r2_is_hydroxide = reactant2 == "O" or reactant2 == "[OH-]" or reactant2 == "OH"
+    
+    # SN2 reaction with hydroxide
+    if (r1_is_alkyl_halide and r2_is_hydroxide):
+        result = predict_sn2_with_hydroxide(reactant1, reactant2)
+        if result:
+            return {"sn2_hydroxide": [result]}
+    elif (r2_is_alkyl_halide and r1_is_hydroxide):
+        result = predict_sn2_with_hydroxide(reactant2, reactant1)
+        if result:
+            return {"sn2_hydroxide": [result]}
+    
+    # Check for alkyl halide coupling
+    if r1_is_alkyl_halide and r2_is_alkyl_halide:
+        # Get the carbon count
+        carbon_count_r1 = reactant1.count('C')
+        carbon_count_r2 = reactant2.count('C')
+        
+        # Find halogens
+        halogen_r1 = next((h for h in ['F', 'Cl', 'Br', 'I'] if h in reactant1), None)
+        halogen_r2 = next((h for h in ['F', 'Cl', 'Br', 'I'] if h in reactant2), None)
+        
+        if halogen_r1 and halogen_r2:
+            # Create carbon chain product
+            product = 'C' * (carbon_count_r1 + carbon_count_r2)
             
-        # Common functional group reactions
-        functional_rxns = [
-            # Esterification: carboxylic acid + alcohol
-            ChemicalReaction("[C:1](=[O:2])[OH:3].[*:4][OH:5]>>[C:1](=[O:2])[O:3][*:4].[OH2:5]"),
-            # Amide formation: carboxylic acid + amine
-            ChemicalReaction("[C:1](=[O:2])[OH:3].[*:4][NH2:5]>>[C:1](=[O:2])[N:5][*:4].[OH2:3]"),
-            # Alkylation: nucleophile + alkyl halide
-            ChemicalReaction("[*:1][H:2].[*:3][X:4]>>[*:1][*:3].[X:4][H:2]"),
-        ]
-        
-        for rxn in functional_rxns:
-            try:
-                products = rxn.run_reaction([reactant1, reactant2])
-                if products and len(products) > 0:
-                    return products[0], "functional_group"
-            except:
-                continue
+            # Create halogen product
+            halogen_product = f"{halogen_r1}{halogen_r2}"
+            
+            results = {"alkyl_coupling": [f"{product}.{halogen_product}"]}
+            return results
+    
+    # Combine reactants
+    reactants = f"{reactant1}.{reactant2}"
+    
+    results = {}
+    
+    # Try each template
+    for template_name, template_smarts in working_templates.items():
+        try:
+            rxn = ChemicalReaction(template_smarts)
+            rxn.generate_reaction_template(radius=1)
+            
+            # Apply the template to predict products
+            product_list = rxn.canonical_template.apply(reactants)
+            
+            # Flatten the product list
+            products = []
+            if product_list:
+                for product_set in product_list:
+                    products.extend(product_set)
+            
+            if products:
+                results[template_name] = products
                 
-        mol1 = Chem.MolFromSmiles(reactant1)
-        mol2 = Chem.MolFromSmiles(reactant2)
+        except Exception as e:
+            continue
+    
+    # If no results yet, try direct RDKit reaction approach
+    if not results:
+        try:
+            rxn = AllChem.ReactionFromSmarts("[C:1][F,Cl,Br,I:2].[O:3][H:4]>>[C:1][O:3].[*:2][H:4]")
+            r1_mol = Chem.MolFromSmiles(reactant1)
+            r2_mol = Chem.MolFromSmiles(reactant2)
+            
+            if r1_mol and r2_mol:
+                # Try both directions
+                products = rxn.RunReactants((r1_mol, r2_mol))
+                
+                if not products or len(products) == 0 or len(products[0]) == 0:
+                    products = rxn.RunReactants((r2_mol, r1_mol))
+                
+                if products and len(products) > 0 and len(products[0]) > 0:
+                    product_smiles = []
+                    for product_set in products:
+                        valid_products = []
+                        for p in product_set:
+                            try:
+                                Chem.SanitizeMol(p)
+                                valid_products.append(Chem.MolToSmiles(p))
+                            except:
+                                pass
+                        if valid_products:
+                            product_smiles.append(".".join(valid_products))
+                    
+                    if product_smiles:
+                        results["rdkit_sn2"] = product_smiles
+        except:
+            pass
+    
+    return results
+
+
+def add_custom_sn2_pattern(r_group, leaving_group, nucleophile, test_reactant1, test_reactant2):
+    """
+    Add a custom SN2 pattern based on specific R-group, leaving group, and nucleophile.
+    
+    Args:
+        r_group (str): R-group atom mapping (e.g., "[CH3:1]", "[CH2:1][CH3:5]")
+        leaving_group (str): Leaving group atom mapping (e.g., "[Br:2]")
+        nucleophile (str): Nucleophile atom mapping (e.g., "[OH:3]")
+        test_reactant1 (str): Test reactant SMILES
+        test_reactant2 (str): Test reactant SMILES
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Create pattern name
+    r_group_str = r_group.replace("[", "").replace("]", "").replace(":", "").split(")")[0]
+    lg_str = leaving_group.replace("[", "").replace("]", "").replace(":", "").split(")")[0]
+    nu_str = nucleophile.replace("[", "").replace("]", "").replace(":", "").split(")")[0]
+    pattern_name = f"sn2_{r_group_str}_{lg_str}_{nu_str}"
+    
+    # Create SMARTS pattern
+    pattern_smarts = f"{r_group}{leaving_group}.[{nucleophile}][H:4]>>{r_group}{nucleophile}.[{leaving_group}][H:4]"
+    
+    try:
+        # Create and test the reaction
+        rxn = ChemicalReaction(pattern_smarts)
+        rxn.generate_reaction_template(radius=1)
         
-        if mol1 is None or mol2 is None:
-            return None, "failed"
+        # Test with provided reactants
+        reactants = f"{test_reactant1}.{test_reactant2}"
         
-        combined = Chem.CombineMols(mol1, mol2)
-        editable = Chem.EditableMol(combined)
+        # Apply the template
+        product_list = rxn.canonical_template.apply(reactants)
         
-        non_h_atoms1 = []
-        non_h_atoms2 = []
+        # Check results
+        products = []
+        if product_list:
+            for product_set in product_list:
+                products.extend(product_set)
         
-        for atom in mol1.GetAtoms():
-            if atom.GetSymbol() != 'H':
-                non_h_atoms1.append(atom.GetIdx())
-        
-        offset = mol1.GetNumAtoms()
-        for atom in mol2.GetAtoms():
-            if atom.GetSymbol() != 'H':
-                non_h_atoms2.append(atom.GetIdx() + offset)
-        
-        if non_h_atoms1 and non_h_atoms2:
-            try:
-                editable.AddBond(non_h_atoms1[0], non_h_atoms2[0], Chem.BondType.SINGLE)
-                product_mol = editable.GetMol()
-                Chem.SanitizeMol(product_mol)
-                return Chem.MolToSmiles(product_mol), "generic"
-            except:
-                return None, "failed"
-        
-        return None, "failed"
+        if products:
+            working_templates[pattern_name] = pattern_smarts
+            return True
+        else:
+            return False
             
     except Exception as e:
-        print(f"Generic reaction attempt failed: {e}")
-    
-    return None, "failed"
+        return False
 
 
-def get_product(df, reactant1, reactant2, rxn_column=None, return_main_product_only=False):
+def get_product(reactant1, reactant2, rxn_column=None, return_main_product_only=False):
+    """
+    Predict the product of a reaction between two reactants.
     
-    reactant_pairs_to_products = {
+    Args:
+        reactant1 (str): SMILES of first reactant
+        reactant2 (str): SMILES of second reactant
+        rxn_column (str, optional): Not used, kept for compatibility
+        return_main_product_only (bool): Whether to return only the main product
+    
+    Returns:
+        str: SMILES of the predicted product
+    """
+    # Check if one is an alkyl halide and the other is hydroxide
+    r1_is_alkyl_halide = is_alkyl_halide(reactant1)
+    r2_is_alkyl_halide = is_alkyl_halide(reactant2)
+    
+    # Simple check for hydroxide
+    r1_is_hydroxide = reactant1 == "O" or reactant1 == "[OH-]" or reactant1 == "OH"
+    r2_is_hydroxide = reactant2 == "O" or reactant2 == "[OH-]" or reactant2 == "OH"
+    
+    # SN2 reaction with hydroxide
+    if (r1_is_alkyl_halide and r2_is_hydroxide):
+        result = predict_sn2_with_hydroxide(reactant1, reactant2)
+        if result:
+            if return_main_product_only:
+                return result.split(".")[0]
+            return result
+    elif (r2_is_alkyl_halide and r1_is_hydroxide):
+        result = predict_sn2_with_hydroxide(reactant2, reactant1)
+        if result:
+            if return_main_product_only:
+                return result.split(".")[0]
+            return result
+    
+    # Check for alkyl halide coupling first
+    if r1_is_alkyl_halide and r2_is_alkyl_halide:
+        # Get the carbon count
+        carbon_count_r1 = reactant1.count('C')
+        carbon_count_r2 = reactant2.count('C')
         
-        (normalize_smiles("C1C=CC=CC=1CO"), normalize_smiles("CBr")): "C1=CC=CC=C1COC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("C1C=CC=CC=1CO")): "C1=CC=CC=C1COC.Br",
-        (normalize_smiles("CCCO"), normalize_smiles("CBr")): "CCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCO")): "CCCOC.Br",
-        (normalize_smiles("CCO"), normalize_smiles("CBr")): "CCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCO")): "CCOC.Br",
-        (normalize_smiles("CO"), normalize_smiles("CBr")): "COC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CO")): "COC.Br",
-        (normalize_smiles("CCCCO"), normalize_smiles("CBr")): "CCCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCCO")): "CCCCOC.Br",
-        (normalize_smiles("CCCCCO"), normalize_smiles("CBr")): "CCCCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCCCO")): "CCCCCOC.Br",
-    }
-    norm_r1 = normalize_smiles(reactant1)
-    norm_r2 = normalize_smiles(reactant2)
-    
-    full_product = None
-    
-    if (norm_r1, norm_r2) in reactant_pairs_to_products:
-        full_product = reactant_pairs_to_products[(norm_r1, norm_r2)]
-    elif (norm_r2, norm_r1) in reactant_pairs_to_products:
-        full_product = reactant_pairs_to_products[(norm_r2, norm_r1)]
-    else:
-        alcohol, halide = find_alcohol_and_halide(reactant1, reactant2)
-        if alcohol and halide:
-            full_product = handle_williamson_ether_synthesis(alcohol, halide)
+        # Find halogens
+        halogen_r1 = next((h for h in ['F', 'Cl', 'Br', 'I'] if h in reactant1), None)
+        halogen_r2 = next((h for h in ['F', 'Cl', 'Br', 'I'] if h in reactant2), None)
         
-        if not full_product:
-            result = predict_product_with_templates(reactant1, reactant2)
-            if isinstance(result, tuple) and len(result) == 2:
-                full_product, _ = result
+        if halogen_r1 and halogen_r2:
+            # Create carbon chain product
+            product = 'C' * (carbon_count_r1 + carbon_count_r2)
+            
+            # Create halogen product
+            halogen_product = f"{halogen_r1}{halogen_r2}"
+            
+            full_product = f"{product}.{halogen_product}"
+            
+            if return_main_product_only:
+                return product
             else:
-                full_product = result
+                return full_product
     
+    # Get products using template-based approach
+    results = predict_reaction_products(reactant1, reactant2)
+    
+    # If no templates matched, return None
+    if not results:
+        return None
+    
+    # Take the first matching template's products
+    first_template = next(iter(results))
+    products = results[first_template]
+    
+    # Handle different return types
+    if isinstance(products, list):
+        # Join products with dot notation
+        full_product = ".".join(products) if len(products) > 0 else None
+    else:
+        full_product = products
+    
+    # Return only the main product if requested
     if return_main_product_only and full_product and "." in full_product:
         return get_main_product(full_product)
     

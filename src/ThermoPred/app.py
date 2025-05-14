@@ -1,3 +1,4 @@
+#app.py file
 import os
 import streamlit as st
 from stmol import showmol
@@ -13,14 +14,8 @@ from reaction_utils import (
     write_xyz_file, 
     calculate_energy_with_rdkit, 
     Energy_comparison, 
-    get_product,
-    get_main_product,
     predict_reaction_products,
-    normalize_smiles,
-    working_templates,
-    is_halide,
-    is_alkyl_halide,
-    is_alcohol
+    working_templates
 )
 
 # Set up the Streamlit page
@@ -57,9 +52,6 @@ def draw_and_process(title, session_key):
                 visualize_3D(molblock)
             
             try:
-                #with st.expander("Energy"):
-                #st.info("Calculating energy with RDKit MMFF94/UFF...")
-                
                 energy, elements, coords = calculate_energy_with_rdkit(smiles)
                 
                 # register the optimized geometry
@@ -91,52 +83,15 @@ with col1:
 with col2:
     mol2 = draw_and_process("Molecule 2", "mol2")
 
-#mol1 = draw_and_process("Molecule 1", "mol1")
-#mol2 = draw_and_process("Molecule 2", "mol2")
-
 # Display molecule types if identified
 if mol1 and mol2:
     types_expander = st.expander("Molecule Types", expanded=False)
     with types_expander:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Molecule 1:**")
-            mol_types = []
-            if is_alkyl_halide(mol1):
-                mol_types.append("Alkyl halide (C-X)")
-            elif is_halide(mol1):
-                mol_types.append("Contains halide (F, Cl, Br, I)")
-            if is_alcohol(mol1):
-                mol_types.append("Contains alcohol group (-OH)")
-            
-            if mol_types:
-                for t in mol_types:
-                    st.write(f"- {t}")
-            else:
-                st.write("- No specific functional groups identified")
-                
-        with col2:
-            st.write("**Molecule 2:**")
-            mol_types = []
-            if is_alkyl_halide(mol2):
-                mol_types.append("Alkyl halide (C-X)")
-            elif is_halide(mol2):
-                mol_types.append("Contains halide (F, Cl, Br, I)")
-            if is_alcohol(mol2):
-                mol_types.append("Contains alcohol group (-OH)")
-            
-            if mol_types:
-                for t in mol_types:
-                    st.write(f"- {t}")
-            else:
-                st.write("- No specific functional groups identified")
-                
-        # Suggest possible reactions
-        st.write("**Possible Reactions:**")
-        if is_alkyl_halide(mol1) and is_alkyl_halide(mol2):
-            st.write("- Alkyl-alkyl coupling (SN2 reaction)")
-        elif (is_alkyl_halide(mol1) and is_alcohol(mol2)) or (is_alkyl_halide(mol2) and is_alcohol(mol1)):
-            st.write("- Williamson ether synthesis likely")
+        st.write("To analyze molecular structure and suggest reactions, you'll need to implement molecule type identification functions in your reaction_utils module.")
+        st.write("You may want to add functions like `is_halide()`, `is_alkyl_halide()`, or `is_alcohol()` to identify functional groups.")
+
+
+
 
 # Template selection dropdown
 template_names = list(working_templates.keys())
@@ -147,6 +102,30 @@ selected_template = st.selectbox("Select reaction template", template_names,
 # Additional option to display only the main product
 show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
                                  help="When checked, the product will include leaving groups like HBr, H2O, etc.")
+
+# Helper function to get the main product (largest molecule) from a dot-separated SMILES
+def get_main_product(product_smiles):
+    """Get the main product (largest molecule) from a dot-separated SMILES"""
+    if "." not in product_smiles:
+        return product_smiles
+    
+    # Split by dots and find the largest molecule
+    components = product_smiles.split(".")
+    largest_component = ""
+    largest_size = 0
+    
+    for comp in components:
+        try:
+            mol = Chem.MolFromSmiles(comp)
+            if mol:
+                size = mol.GetNumAtoms()
+                if size > largest_size:
+                    largest_size = size
+                    largest_component = comp
+        except:
+            pass
+    
+    return largest_component if largest_component else components[0]
 
 # Predict product button
 if mol1 and mol2:
@@ -159,14 +138,27 @@ if mol1 and mol2:
     if predict_button:
         with st.spinner("Predicting product..."):
             try:
+                reactants = f"{mol1}.{mol2}"
+                
                 if selected_template == "Auto-detect":
-                    # Use the general product prediction function
-                    full_product = get_product(mol1, mol2, return_main_product_only=False)
-                    reaction_info = "Auto-detected"
+                    # Try template-based prediction
+                    product_dict = predict_reaction_products(mol1, mol2)
+                    
+                    # Store for later display
+                    st.session_state['template_matches'] = product_dict
+                    
+                    if product_dict:
+                        # Take the first successful template's products
+                        first_template = list(product_dict.keys())[0]
+                        products = product_dict[first_template]
+                        full_product = ".".join(products) if isinstance(products, list) else products
+                        reaction_info = f"Matched template: {first_template}"
+                    else:
+                        st.error("No templates matched these reactants.")
+                        full_product = None
+                        reaction_info = "No matching templates found"
                 else:
                     # Use the specific template selected by the user
-                    reactants = f"{mol1}.{mol2}"
-                    
                     try:
                         from rxnutils.chem.reaction import ChemicalReaction
                         
@@ -190,19 +182,29 @@ if mol1 and mol2:
                             # Join products with dot notation
                             full_product = ".".join(products)
                             reaction_info = f"Template: {selected_template}"
+                            
+                            # Store single template match for display
+                            st.session_state['template_matches'] = {selected_template: products}
                         else:
-                            # Fallback to auto-detection if template doesn't match
-                            full_product = get_product(mol1, mol2, return_main_product_only=False)
-                            reaction_info = f"Template didn't match - fell back to auto-detection"
+                            st.warning(f"The selected template '{selected_template}' didn't match these reactants.")
+                            
+                            # Try with auto-detect as fallback
+                            product_dict = predict_reaction_products(mol1, mol2)
+                            
+                            if product_dict:
+                                st.session_state['template_matches'] = product_dict
+                                first_template = list(product_dict.keys())[0]
+                                products = product_dict[first_template]
+                                full_product = ".".join(products) if isinstance(products, list) else products
+                                reaction_info = f"Fell back to template: {first_template}"
+                            else:
+                                full_product = None
+                                reaction_info = "No matching templates found"
                     except Exception as e:
-                        # Fallback to auto-detection if template application fails
-                        full_product = get_product(mol1, mol2, return_main_product_only=False)
-                        reaction_info = f"Template application failed - fell back to auto-detection"
+                        st.error(f"Error applying template: {str(e)}")
+                        full_product = None
                 
                 if full_product:
-                    # Log the template matches for debugging
-                    st.session_state['template_matches'] = predict_reaction_products(mol1, mol2)
-                    
                     # Determine which product to display based on user preference
                     if not show_leaving_groups and "." in full_product:
                         display_product = get_main_product(full_product)
@@ -235,7 +237,7 @@ if mol1 and mol2:
                             for template, products in st.session_state['template_matches'].items():
                                 st.markdown(f"- **{template}**: `{products if isinstance(products, str) else ', '.join(products)}`")
                         else:
-                            st.write("No templates matched directly. Using specialized alkyl coupling handler.")
+                            st.write("No templates matched directly.")
                     
                     # Generate 3D visualization for the display product
                     molblock = generate_3D(display_product)
@@ -308,9 +310,9 @@ with st.expander("About this app"):
     
     **Features:**
     - Template-based reaction prediction for accurate results
-    - Special handling for alkyl halide coupling reactions
-    - Support for specific reaction types like SN2 substitutions
+    - Special handling for SN2 reactions and other substitution reactions
     - Energy calculations using RDKit force fields
+    
     **Limitations:**
     - Predictions are based on reaction templates and may not capture all possible reactions
     - Energy calculations are approximate and use 0 K as the reference temperature

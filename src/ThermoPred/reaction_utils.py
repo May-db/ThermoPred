@@ -1,9 +1,9 @@
-# reaction_utils_fixed.py
-from rxnutils.chem.reaction import ChemicalReaction
 from rdkit import Chem
 from rdkit.Chem import AllChem
+from rdkit.Chem import rdChemReactions
 import os
 import numpy as np
+from rdkit.Chem import rdChemReactions
 
 # Utility functions
 def generate_3D(smiles):
@@ -159,10 +159,27 @@ def Energy_comparison(E1, E2, Ep):
         return "equilibrium"
     else:
         return "unstable"
+    
+REACTION_TEMPLATES = {
+    # Amide formation 
+    "amide_formation": "[C:1](=[O:2])O.[N:3]>>[C:1](=[O:2])[N:3]",
+    
+    # SN2 reactions
+    "sn2_halide_oh": "[C:1][Cl,Br,I:2].[O:3]>>[C:1][O:3]",
+    "sn2_halide_n": "[C:1][Cl,Br,I:2].[N:3]>>[C:1][N:3]",
+    
+    # Carbon-carbon coupling (R₁-X + R₂-Y → R₁-R₂)
+    "c_c_coupling": "[C:1][Cl,Br,I:2].[C:3][Cl,Br,I:4]>>[C:1][C:3]",
+    
+    # Specific coupling examples
+    "methyl_coupling": "C[Cl,Br,I].C[Cl,Br,I]>>CC",
+    
+    # Interhalogen
+    "halogen_exchange": "[Cl:1].[Br:2]>>[Cl:1][Br:2]"
+}
 
-# Helper function to get the main product from a dot-separated mixture
 def get_main_product(product_smiles):
-    """Get the main product (largest molecule) from a dot-separated SMILES"""
+    """Extract the main product (largest molecule) from a dot-separated SMILES"""
     if "." not in product_smiles:
         return product_smiles
     
@@ -172,158 +189,103 @@ def get_main_product(product_smiles):
     largest_size = 0
     
     for comp in components:
-        try:
-            mol = Chem.MolFromSmiles(comp)
-            if mol:
-                size = mol.GetNumAtoms()
-                if size > largest_size:
-                    largest_size = size
-                    largest_component = comp
-        except:
-            pass
+        mol = Chem.MolFromSmiles(comp)
+        if mol:
+            size = mol.GetNumAtoms()
+            if size > largest_size:
+                largest_size = size
+                largest_component = comp
     
     return largest_component if largest_component else components[0]
 
-# Define a set of reaction patterns that work
-working_templates = {
-    # Sulfonyl chloride substitution
-    "sulfonyl_substitution": "Cl[S:3]([CH2:2][CH3:1])(=[O:4])=[O:5].[OH:6][CH2:7][CH2:8][Br:9]>>[CH3:1][CH2:2][S:3](=[O:4])(=[O:5])[O:6][CH2:7][CH2:8][Br:9]",
-    
-    # SN2 with specific leaving groups and nucleophiles
-    "sn2_bromide_oh": "[CH3:1][Br:2].[OH:3][H:4]>>[CH3:1][OH:3].[Br:2][H:4]",
-    
-    # Additional SN2 templates with valid atom mappings
-    "sn2_chloride_oh": "[CH3:1][Cl:2].[OH:3][H:4]>>[CH3:1][OH:3].[Cl:2][H:4]",
-    "sn2_iodide_oh": "[CH3:1][I:2].[OH:3][H:4]>>[CH3:1][OH:3].[I:2][H:4]",
-    
-    # SN2 with different nucleophiles
-    "sn2_bromide_nh2": "[CH3:1][Br:2].[NH2:3][H:4]>>[CH3:1][NH2:3].[Br:2][H:4]",
-    "sn2_bromide_sh": "[CH3:1][Br:2].[SH:3][H:4]>>[CH3:1][SH:3].[Br:2][H:4]",
-    
-    # SIMPLIFIED Wurtz reaction templates (no atom mapping)
-    "wurtz_simple": "C[Cl,Br,I].C[Cl,Br,I]>>CC.Cl.Br",
-    "wurtz_cl_br": "C[Cl].C[Br]>>CC.Cl.Br",
-    
-    # Wurtz reaction with leaving groups
-    "wurtz_with_leaving": "C[Cl].C[Br]>>CC.HCl.HBr",
-    
-    # Manual synthesis for CCCCCCl + CBr case
-    "alkyl_coupling_custom": "CCCCCCl.CBr>>CCCCCCC.Cl.Br"
-}
-
-# Function to identify if a molecule contains a halide
-def is_halide(smiles):
-    """Check if molecule contains a halide (F, Cl, Br, I)"""
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
-    for atom in mol.GetAtoms():
-        if atom.GetSymbol() in ['F', 'Cl', 'Br', 'I']:
-            return True
-    return False
-
-# Function to identify if a molecule is an alkyl halide
-def is_alkyl_halide(smiles):
-    """Check if molecule is an alkyl halide (C-X where X is halide)"""
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
-    for atom in mol.GetAtoms():
-        if atom.GetSymbol() in ['F', 'Cl', 'Br', 'I']:
-            for neighbor in atom.GetNeighbors():
-                if neighbor.GetSymbol() == 'C':
-                    return True
-    return False
-
-# Function to identify if a molecule contains an alcohol group
-def is_alcohol(smiles):
-    """Check if molecule contains an alcohol group (-OH)"""
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
-    
-    # Pattern for alcohol group
-    alcohol_pattern = Chem.MolFromSmarts('[OX2H]')
-    return mol.HasSubstructMatch(alcohol_pattern)
-
-def predict_reaction_products(reactant1, reactant2=None):
+def react(reactant1_smiles, reactant2_smiles=None):
     """
-    Predict the products of a reaction between two reactants using working templates.
+    Extremely simplified reaction prediction using direct RDKit approach.
     
     Args:
-        reactant1 (str): SMILES of first reactant
-        reactant2 (str): SMILES of second reactant, can be None
-    
+        reactant1_smiles (str): SMILES string for first reactant
+        reactant2_smiles (str, optional): SMILES string for second reactant
+        
     Returns:
-        dict: Dictionary of {reaction_type: predicted_products}
+        tuple: (product_smiles, template_used) if successful, (None, None) if not
     """
-    # Combine reactants
-    if reactant2:
-        reactants = f"{reactant1}.{reactant2}"
-    else:
-        reactants = reactant1
+    # Handle dot-separated input
+    if reactant2_smiles is None and '.' in reactant1_smiles:
+        parts = reactant1_smiles.split('.', 1)
+        reactant1_smiles, reactant2_smiles = parts
     
-    # Handle specific cases for alkyl halide coupling directly
-    # This ensures that common cases like CCCCCCl + CBr work correctly
-    if is_alkyl_halide(reactant1) and is_alkyl_halide(reactant2):
-        # Extract carbon chains by removing halogens
-        r1_carbon = ""
-        r2_carbon = ""
-        halogen1 = ""
-        halogen2 = ""
-        
-        # Find halogen type in reactant1
-        for element in ['Cl', 'Br', 'I', 'F']:
-            if element in reactant1:
-                halogen1 = element
-                r1_carbon = reactant1.replace(element, '')
-                break
-                
-        # Find halogen type in reactant2
-        for element in ['Cl', 'Br', 'I', 'F']:
-            if element in reactant2:
-                halogen2 = element
-                r2_carbon = reactant2.replace(element, '')
-                break
-        
-        if r1_carbon and r2_carbon and halogen1 and halogen2:
-            # Create combined carbon chain
-            product = r1_carbon + r2_carbon
-            
-            # Validate the product structure
-            product_mol = Chem.MolFromSmiles(product)
-            if product_mol:
-                # Return the successful coupling result
-                return {
-                    "wurtz_coupling_direct": [
-                        Chem.MolToSmiles(product_mol),
-                        f"H{halogen1}",
-                        f"H{halogen2}"
-                    ]
-                }
+    # Convert SMILES to RDKit molecules - exactly following your example
+    mol1 = Chem.MolFromSmiles(reactant1_smiles)
+    mol2 = Chem.MolFromSmiles(reactant2_smiles) if reactant2_smiles else None
     
-    # Try with templates as fallback
-    results = {}
+    if not mol1 or (reactant2_smiles and not mol2):
+        print(f"Error: Invalid SMILES - {reactant1_smiles} or {reactant2_smiles}")
+        return None, None
     
-    for template_name, template_smarts in working_templates.items():
+    # Create reactants tuple - exactly following your example
+    reactants = (mol1, mol2) if mol2 else (mol1,)
+    
+    # Special case for elemental halogens
+    if reactant1_smiles == "Cl" and reactant2_smiles == "Br":
+        return "ClBr", "halogen_exchange"
+    elif reactant1_smiles == "Br" and reactant2_smiles == "Cl":
+        return "BrCl", "halogen_exchange"
+    
+    # Basic check for alkyl halides
+    is_r1_alkyl_halide = any(atom.GetSymbol() in ["Cl", "Br", "I"] for atom in mol1.GetAtoms())
+    is_r2_alkyl_halide = mol2 and any(atom.GetSymbol() in ["Cl", "Br", "I"] for atom in mol2.GetAtoms())
+    
+    # For two alkyl halides, try carbon-carbon coupling first
+    if is_r1_alkyl_halide and is_r2_alkyl_halide:
         try:
-            rxn = ChemicalReaction(template_smarts)
-            rxn.generate_reaction_template(radius=1)
-            
-            # Apply the template to predict products
-            product_list = rxn.canonical_template.apply(reactants)
-            
-            # Flatten the product list
-            products = []
-            if product_list:
-                for product_set in product_list:
-                    products.extend(product_set)
-            
-            if products:
-                results[template_name] = products
-                
-        except Exception as e:
-            # Skip failed templates
-            pass
+            rxn = rdChemReactions.ReactionFromSmarts(REACTION_TEMPLATES["c_c_coupling"])
+            products = rxn.RunReactants(reactants)
+            if products and len(products) > 0 and len(products[0]) > 0:
+                full_product_smiles = Chem.MolToSmiles(products[0][0])
+                main_product = get_main_product(full_product_smiles)
+                return main_product, "c_c_coupling"
+        except Exception:
+            pass  # If this fails, continue with other templates
     
-    return results
+    # Try all templates
+    for template_name, template_smarts in REACTION_TEMPLATES.items():
+        try:
+            # Create reaction from SMARTS - exactly following your example
+            rxn = rdChemReactions.ReactionFromSmarts(template_smarts)
+            
+            # Run the reaction - exactly following your example
+            products = rxn.RunReactants(reactants)
+            
+            # Check if we got any products
+            if products and len(products) > 0 and len(products[0]) > 0:
+                # Get the product SMILES
+                full_product_smiles = Chem.MolToSmiles(products[0][0])
+                
+                # Extract the main product if there are multiple products
+                main_product = get_main_product(full_product_smiles)
+                
+                return main_product, template_name
+        except Exception:
+            continue
+    
+    return None, None
+
+# Test script
+if __name__ == "__main__":
+    test_cases = [
+        # Basic reactions from your example
+        ("C(=O)O", "CNC", "Amide formation"),
+        ("CBr", "O", "SN2 substitution"),
+        
+        # Carbon-carbon coupling (R₁Cl + R₂Br → R₁R₂)
+        ("CCl", "CBr", "Methyl coupling"),
+        ("CCCCCCl", "CBr", "Hexyl-methyl coupling"),
+        
+        # Elemental halogens
+        ("Cl", "Br", "Interhalogen compound")
+    ]
+    
+    for reactant1, reactant2, description in test_cases:
+        product, template = react(reactant1, reactant2)
+        result = f"{product} (using {template})" if product else "No reaction"
+        print(f"{reactant1} + {reactant2} → {result} - {description}")

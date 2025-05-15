@@ -8,17 +8,17 @@ ThermoPred is an interactive web application that allows chemists to predict che
 ## Features
 * __User-friendly drawing interface__ powered by Ketcher for creating molecular structures
 * __Template-based reaction prediction__ supports common organic reactions including: 
-`* Nucleophilic substitution (SN2)`
-`* Amide formation `
-`* Ester formation`
-`* Carbon-carbon coupling reactions`
-`* Halogen exchange reactions`
+  * Nucleophilic substitution (SN2)
+  * Amide formation 
+  * Ester formation
+  * Carbon-carbon coupling reactions
+  * Halogen exchange reactions
 * __Real-time 3D visualization__ of reactants and products
 * __Energy calculations__ using RDKit force fileds for thermodynamic analysis
 * __Simple interpretation__ of reaction favorability with clear visual indicators
 
 ## Installation
-## Prerequisites
+### Prerequisites
 * Python 3.8+
 * RDKit
 * xTB(Semienpirical Extended Tight-Binding Program)
@@ -56,7 +56,7 @@ pip install -e .
 ```
 
 ## Usage
-## Starting the Web App
+### Starting the Web App
 ```bash
 cd path/to/ThermoPred
 streamlit run app.py
@@ -71,7 +71,7 @@ streamlit run app.py
 Tha application will be available at http://localhost:8501 by default
 
 ## Technical Details
-__Reaction Prediction__
+### Reaction Prediction
 ThermoPred uses a template-based approach for reaction prediction, similar to how any retrosynthesis systems work. The templates are defined using SMARTS patters with atom mapping to identify how atoms move from reactants to products.
 
 Key reaction types supported: 
@@ -90,12 +90,12 @@ the application uses RDKit's force fields(MMFF94) to :
 
 
 ## Troubleshooting
-## Common Issues
+### Common Issues
 1. __Invalid SMILES Error__: Ensure you molecular structures are chemically valid
 2. __No Templates Matched__: The current reaction may not be supported by existing templates
 3. __3D Structure Generation Fails__: Some complex molecules may need simpler representations
 4. __Energy Calculation Error__:: Very large or complex might cause force field calculation failures
-## Extending Reaction Templates
+### Extending Reaction Templates
 If you need to add support for new reaction types, you can extend the `REACTION_TEMPLATES` dictionary in `reaction_utils.py` with additional SMARTS patterns.
 
 ## License ?

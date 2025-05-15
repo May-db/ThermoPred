@@ -83,7 +83,6 @@ if "mol2" not in st.session_state:
 
 
 mol1 = draw_and_process("Molecule 1", "mol1")
-
 mol2 = draw_and_process("Molecule 2", "mol2")
 
 # Display molecule types if identified

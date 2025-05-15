@@ -94,7 +94,7 @@ the application uses RDKit's force fields(MMFF94) to :
 1. __Invalid SMILES Error__: Ensure you molecular structures are chemically valid
 2. __No Templates Matched__: The current reaction may not be supported by existing templates
 3. __3D Structure Generation Fails__: Some complex molecules may need simpler representations
-4. __Energy Calculation Error__:: Very large or complex might cause force field calculation failures
+4. __Energy Calculation Error__: Very large or complex might cause force field calculation failures
 ### Extending Reaction Templates
 If you need to add support for new reaction types, you can extend the `REACTION_TEMPLATES` dictionary in `reaction_utils.py` with additional SMARTS patterns.
 

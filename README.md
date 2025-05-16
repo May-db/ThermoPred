@@ -70,5 +70,5 @@ Tha application will be available at http://localhost:8501 by default
 If you need to add support for new reaction types, you can extend the `REACTION_TEMPLATES` dictionary in `reaction_utils.py` with additional SMARTS patterns.
 
 ## License 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 

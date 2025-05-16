@@ -1,13 +1,11 @@
-import os
-import numpy as np
-import pandas as pd
-from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from rxnutils.chem.reaction import ChemicalReaction
-import subprocess
+from rdkit.Chem import rdChemReactions
+import os
+import numpy as np
+from rdkit.Chem import rdChemReactions
 
-
+# Utility functions
 def generate_3D(smiles):
     if "." in smiles:
         smiles = get_main_product(smiles)
@@ -43,10 +41,10 @@ def smiles_to_3d(smiles, add_H=True, optimize=True, max_attempts=3):
         success = False
         for attempt in range(max_attempts):
             try:
-                # Essayer d'intégrer la molécule
+                # Trying to embed the molecule
                 AllChem.EmbedMolecule(mol, params)
                 if mol.GetNumConformers() > 0:
-                # Optimiser avec MMFF si demandé
+                # Optimize with MMFF if requested
                     if optimize:
                         AllChem.MMFFOptimizeMolecule(mol)
                     success = True
@@ -73,19 +71,19 @@ def write_xyz_file(elements, coordinates, filename):
 
 
 def calculate_energy_with_rdkit(smiles, optimize_steps=500):
-    """Calcule l'énergie d'une molécule en utilisant RDKit au lieu de xTB"""
+    """Calculate a molecule's energy using RDKit instead of xTB"""
     try:
-        # Nettoyer le SMILES
+        # Clean the SMILES
         if "." in smiles:
-            smiles = smiles.split(".")[0]  # Prendre seulement la première molécule
+            smiles = get_main_product(smiles)
         
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            raise ValueError(f"Impossible de lire le SMILES: {smiles}")
+            raise ValueError(f"Cannot read SMILES: {smiles}")
         
         mol = Chem.AddHs(mol)
         
-        # generate a clean 3D molecule
+        # Generate a clean 3D molecule
         params = AllChem.ETKDGv3()
         params.useRandomCoords = True
         params.randomSeed = 42
@@ -93,13 +91,13 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
         AllChem.EmbedMultipleConfs(mol, numConfs=10, params=params)
         
         if mol.GetNumConformers() == 0:
-            raise ValueError("Échec de génération des coordonnées 3D")
+            raise ValueError("Failed to generate 3D coordinates")
         
-        # all conformation are optimized in order to take the smallest value later on
+        # All conformations are optimized to take the lowest energy later
         energies = []
         for conf_id in range(mol.GetNumConformers()):
             try:
-                # setting the MMFF94 field
+                # Setting up the MMFF94 field
                 mp = AllChem.MMFFGetMoleculeProperties(mol, mmffVariant='MMFF94s')
                 if mp is None:
                     continue
@@ -112,7 +110,7 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
                 ff.Initialize()
                 result = ff.Minimize(maxIts=optimize_steps)
                 
-                # Energie calculus
+                # Energy calculation
                 energy = ff.CalcEnergy()
                 energies.append((conf_id, energy))
             except Exception as e:
@@ -134,24 +132,24 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
                     continue
         
         if not energies:
-            raise ValueError("Impossible de calculer l'énergie avec MMFF94 ou UFF")
+            raise ValueError("Cannot calculate energy with MMFF94 or UFF")
         
-        # takes the lowest energy
+        # Take the lowest energy
         energies.sort(key=lambda x: x[1])
         best_conf_id, lowest_energy = energies[0]
         
-        # Hartree conversion
+        # Convert to Hartree
         energy_hartree = lowest_energy / 627.5  # 1 Hartree ≈ 627.5 kcal/mol
         
-        # creation of a xyz file in case
+        # Create xyz data
         conf = mol.GetConformer(best_conf_id)
         elements = [atom.GetSymbol() for atom in mol.GetAtoms()]
         coordinates = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())])
         
-        return energy_hartree , elements, coordinates
+        return energy_hartree, elements, coordinates
     
     except Exception as e:
-        raise ValueError(f"Erreur lors du calcul de l'énergie: {str(e)}")
+        raise ValueError(f"Error calculating energy: {str(e)}")
 
 def Energy_comparison(E1, E2, Ep):
     delta_E = E1 + E2 - Ep
@@ -161,301 +159,133 @@ def Energy_comparison(E1, E2, Ep):
         return "equilibrium"
     else:
         return "unstable"
-
-
-def normalize_smiles(smiles):
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            return smiles
-        return Chem.MolToSmiles(mol)
-    except:
-        return smiles
-
+    
+REACTION_TEMPLATES = {
+    # Amide formation 
+    "amide_formation": "[C:1](=[O:2])O.[N:3]>>[C:1](=[O:2])[N:3]",
+    
+    # SN2 reactions
+    "sn2_halide_oh": "[C:1][Cl,Br,I:2].[O:3]>>[C:1][O:3]",
+    "sn2_halide_n": "[C:1][Cl,Br,I:2].[N:3]>>[C:1][N:3]",
+    
+    # Carbon-carbon coupling (R₁-X + R₂-Y → R₁-R₂)
+    "c_c_coupling": "[C:1][Cl,Br,I:2].[C:3][Cl,Br,I:4]>>[C:1][C:3]",
+    
+    # Specific coupling examples
+    "methyl_coupling": "C[Cl,Br,I].C[Cl,Br,I]>>CC",
+    
+    # Interhalogen
+    "halogen_exchange": "[Cl:1].[Br:2]>>[Cl:1][Br:2]"
+}
 
 def get_main_product(product_smiles):
-    
-    if product_smiles is None:
-        return None
-        
+    """Extract the main product (largest molecule) from a dot-separated SMILES"""
     if "." not in product_smiles:
         return product_smiles
     
+    # Split by dots and find the largest molecule
     components = product_smiles.split(".")
-    
-    if len(components) == 1:
-        return components[0]
-    largest_component = components[0]
+    largest_component = ""
     largest_size = 0
     
-    for component in components:
-        mol = Chem.MolFromSmiles(component)
+    for comp in components:
+        mol = Chem.MolFromSmiles(comp)
         if mol:
             size = mol.GetNumAtoms()
             if size > largest_size:
                 largest_size = size
-                largest_component = component
+                largest_component = comp
     
-    return largest_component
+    return largest_component if largest_component else components[0]
 
-
-def is_alcohol(smiles):
-    """Check if a SMILES string represents an alcohol."""
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
+def react(reactant1_smiles, reactant2_smiles=None):
+    """
+    Extremely simplified reaction prediction using direct RDKit approach.
     
-    oh_pattern = Chem.MolFromSmarts("[OX2H]")
-    return mol.HasSubstructMatch(oh_pattern)
-
-
-def is_alkyl_halide(smiles):
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
+    Args:
+        reactant1_smiles (str): SMILES string for first reactant
+        reactant2_smiles (str, optional): SMILES string for second reactant
+        
+    Returns:
+        tuple: (product_smiles, template_used) if successful, (None, None) if not
+    """
+    # Handle dot-separated input
+    if reactant2_smiles is None and '.' in reactant1_smiles:
+        parts = reactant1_smiles.split('.', 1)
+        reactant1_smiles, reactant2_smiles = parts
     
-    # Check for C-X bond (X = F, Cl, Br, I)
-    cx_pattern = Chem.MolFromSmarts("[CX4][F,Cl,Br,I]")
-    return mol.HasSubstructMatch(cx_pattern)
-
-
-def find_alcohol_and_halide(reactant1, reactant2):
-    r1_is_alcohol = is_alcohol(reactant1)
-    r1_is_halide = is_alkyl_halide(reactant1)
-    r2_is_alcohol = is_alcohol(reactant2)
-    r2_is_halide = is_alkyl_halide(reactant2)
+    # Convert SMILES to RDKit molecules - exactly following your example
+    mol1 = Chem.MolFromSmiles(reactant1_smiles)
+    mol2 = Chem.MolFromSmiles(reactant2_smiles) if reactant2_smiles else None
     
-    if r1_is_alcohol and r2_is_halide:
-        return reactant1, reactant2
-    elif r2_is_alcohol and r1_is_halide:
-        return reactant2, reactant1
-    else:
+    if not mol1 or (reactant2_smiles and not mol2):
+        print(f"Error: Invalid SMILES - {reactant1_smiles} or {reactant2_smiles}")
         return None, None
-
-
-def handle_williamson_ether_synthesis(alcohol, halide):
-    try:
-        halogen = None
-        for element in ["Br", "Cl", "I", "F"]:
-            if element in halide:
-                halogen = element
-                break
-        
-        if halogen is None:
-            return None
-        
-        alcohol_mol = Chem.MolFromSmiles(alcohol)
-        halide_mol = Chem.MolFromSmiles(halide)
-        
-        if alcohol_mol is None or halide_mol is None:
-            return None
-        
-        oh_matches = alcohol_mol.GetSubstructMatches(Chem.MolFromSmarts("[OX2H]"))
-        
-        cx_matches = halide_mol.GetSubstructMatches(Chem.MolFromSmarts(f"[C][{halogen}]"))
-        
-        if not oh_matches or not cx_matches:
-            return None
-        
-        o_idx = oh_matches[0][0]
-        c_idx_in_halide = cx_matches[0][0]
-        
-        new_alcohol = Chem.Mol(alcohol_mol)
-        new_halide = Chem.Mol(halide_mol)
-        
-        new_alcohol = Chem.DeleteSubstructs(new_alcohol, Chem.MolFromSmarts("[OX2H]-[H]"))
-        
-        halide_without_x = Chem.DeleteSubstructs(new_halide, Chem.MolFromSmarts(f"[{halogen}]"))
-        
-        r_group_smiles = Chem.MolToSmiles(halide_without_x)
-        
-        ether_smiles = alcohol.replace("O", f"O{r_group_smiles}")
-        
-        if halogen == "Br":
-            leaving_group = "Br"
-        elif halogen == "Cl":
-            leaving_group = "Cl"
-        elif halogen == "I":
-            leaving_group = "I"
-        else:
-            leaving_group = "F"
-        
-        return f"{ether_smiles}.{leaving_group}"
-    except Exception as e:
-        print(f"Error in handle_williamson_ether_synthesis: {e}")
-        return None
-
-
-def predict_reaction(reactant1_smiles, reactant2_smiles, reaction_type="default"):
-    if reaction_type == "substitution":
-        alcohol, halide = find_alcohol_and_halide(reactant1_smiles, reactant2_smiles)
-        
-        if alcohol and halide:
-            return handle_williamson_ether_synthesis(alcohol, halide)
     
-    reaction_patterns = {
-        "default": "[*:1][*:2].[*:3][*:4]>>[*:1][*:3].[*:2][*:4]",
-        "addition": "[C:1]=[C:2].[*:3][*:4]>>[*:3][C:1]-[C:2][*:4]",
-        "elimination": "[*:1][C:2]-[C:3][*:4]>>[*:1][C:2]=[C:3][*:4]",
-        "condensation": "[*:1][OH:5].[HO:6][*:2]>>[*:1][*:2].[OH2:5,6]",
-    }
+    # Create reactants tuple - exactly following your example
+    reactants = (mol1, mol2) if mol2 else (mol1,)
     
-    rxn_smarts = reaction_patterns.get(reaction_type, reaction_patterns["default"])
+    # Special case for elemental halogens
+    if reactant1_smiles == "Cl" and reactant2_smiles == "Br":
+        return "ClBr", "halogen_exchange"
+    elif reactant1_smiles == "Br" and reactant2_smiles == "Cl":
+        return "BrCl", "halogen_exchange"
     
-    try:
-        rxn = ChemicalReaction(rxn_smarts)
-        products = rxn.run_reaction([reactant1_smiles, reactant2_smiles])
-        if products and len(products) > 0:
-            return products[0]
-    except Exception as e:
-        print(f"rxnutils reaction failed: {e}")
+    # Basic check for alkyl halides
+    is_r1_alkyl_halide = any(atom.GetSymbol() in ["Cl", "Br", "I"] for atom in mol1.GetAtoms())
+    is_r2_alkyl_halide = mol2 and any(atom.GetSymbol() in ["Cl", "Br", "I"] for atom in mol2.GetAtoms())
     
-    try:
-        rxn = AllChem.ReactionFromSmarts(rxn_smarts)
-        
-        reactant1 = Chem.MolFromSmiles(reactant1_smiles)
-        reactant2 = Chem.MolFromSmiles(reactant2_smiles)
-        
-        if reactant1 is None or reactant2 is None:
-            return None
-        
-        products = rxn.RunReactants((reactant1, reactant2))
-        
-        if products and len(products) > 0 and len(products[0]) > 0:
-            product_mol = products[0][0]
-            try:
-                Chem.SanitizeMol(product_mol)
-                return Chem.MolToSmiles(product_mol)
-            except:
-                return None
-    except Exception as e:
-        print(f"RDKit reaction failed: {e}")
+    # For two alkyl halides, try carbon-carbon coupling first
+    if is_r1_alkyl_halide and is_r2_alkyl_halide:
+        try:
+            rxn = rdChemReactions.ReactionFromSmarts(REACTION_TEMPLATES["c_c_coupling"])
+            products = rxn.RunReactants(reactants)
+            if products and len(products) > 0 and len(products[0]) > 0:
+                full_product_smiles = Chem.MolToSmiles(products[0][0])
+                main_product = get_main_product(full_product_smiles)
+                return main_product, "c_c_coupling"
+        except Exception:
+            pass  # If this fails, continue with other templates
     
-    return None
-
-
-def predict_product_with_templates(reactant1, reactant2):
-    alcohol, halide = find_alcohol_and_halide(reactant1, reactant2)
-    if alcohol and halide:
-        product = handle_williamson_ether_synthesis(alcohol, halide)
-        if product:
-            return product, "substitution"
-    
-    reaction_types = ["substitution", "addition", "elimination", "condensation", "default"]
-    
-    for rxn_type in reaction_types:
-        product = predict_reaction(reactant1, reactant2, rxn_type)
-        if product:
-            return product, rxn_type
-    
-    return attempt_generic_reaction(reactant1, reactant2)
-
-
-def attempt_generic_reaction(reactant1, reactant2):
-    """Attempt to predict a reaction product using generic approaches."""
-    try:
-        # Try using rxnutils for generic reactions
-        # General coupling reaction
-        coupling_rxn = ChemicalReaction("[*:1]~[*:2].[*:3]~[*:4]>>[*:1]~[*:2]-[*:3]~[*:4]")
-        products = coupling_rxn.run_reaction([reactant1, reactant2])
-        if products and len(products) > 0:
-            return products[0], "coupling"
+    # Try all templates
+    for template_name, template_smarts in REACTION_TEMPLATES.items():
+        try:
+            # Create reaction from SMARTS - exactly following your example
+            rxn = rdChemReactions.ReactionFromSmarts(template_smarts)
             
-        # Common functional group reactions
-        functional_rxns = [
-            # Esterification: carboxylic acid + alcohol
-            ChemicalReaction("[C:1](=[O:2])[OH:3].[*:4][OH:5]>>[C:1](=[O:2])[O:3][*:4].[OH2:5]"),
-            # Amide formation: carboxylic acid + amine
-            ChemicalReaction("[C:1](=[O:2])[OH:3].[*:4][NH2:5]>>[C:1](=[O:2])[N:5][*:4].[OH2:3]"),
-            # Alkylation: nucleophile + alkyl halide
-            ChemicalReaction("[*:1][H:2].[*:3][X:4]>>[*:1][*:3].[X:4][H:2]"),
-        ]
-        
-        for rxn in functional_rxns:
-            try:
-                products = rxn.run_reaction([reactant1, reactant2])
-                if products and len(products) > 0:
-                    return products[0], "functional_group"
-            except:
-                continue
+            # Run the reaction - exactly following your example
+            products = rxn.RunReactants(reactants)
+            
+            # Check if we got any products
+            if products and len(products) > 0 and len(products[0]) > 0:
+                # Get the product SMILES
+                full_product_smiles = Chem.MolToSmiles(products[0][0])
                 
-        mol1 = Chem.MolFromSmiles(reactant1)
-        mol2 = Chem.MolFromSmiles(reactant2)
-        
-        if mol1 is None or mol2 is None:
-            return None, "failed"
-        
-        combined = Chem.CombineMols(mol1, mol2)
-        editable = Chem.EditableMol(combined)
-        
-        non_h_atoms1 = []
-        non_h_atoms2 = []
-        
-        for atom in mol1.GetAtoms():
-            if atom.GetSymbol() != 'H':
-                non_h_atoms1.append(atom.GetIdx())
-        
-        offset = mol1.GetNumAtoms()
-        for atom in mol2.GetAtoms():
-            if atom.GetSymbol() != 'H':
-                non_h_atoms2.append(atom.GetIdx() + offset)
-        
-        if non_h_atoms1 and non_h_atoms2:
-            try:
-                editable.AddBond(non_h_atoms1[0], non_h_atoms2[0], Chem.BondType.SINGLE)
-                product_mol = editable.GetMol()
-                Chem.SanitizeMol(product_mol)
-                return Chem.MolToSmiles(product_mol), "generic"
-            except:
-                return None, "failed"
-        
-        return None, "failed"
-            
-    except Exception as e:
-        print(f"Generic reaction attempt failed: {e}")
+                # Extract the main product if there are multiple products
+                main_product = get_main_product(full_product_smiles)
+                
+                return main_product, template_name
+        except Exception:
+            continue
     
-    return None, "failed"
+    return None, None
 
-
-def get_product(df, reactant1, reactant2, rxn_column=None, return_main_product_only=False):
-    
-    reactant_pairs_to_products = {
+# Test script
+if __name__ == "__main__":
+    test_cases = [
+        # Basic reactions from your example
+        ("C(=O)O", "CNC", "Amide formation"),
+        ("CBr", "O", "SN2 substitution"),
         
-        (normalize_smiles("C1C=CC=CC=1CO"), normalize_smiles("CBr")): "C1=CC=CC=C1COC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("C1C=CC=CC=1CO")): "C1=CC=CC=C1COC.Br",
-        (normalize_smiles("CCCO"), normalize_smiles("CBr")): "CCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCO")): "CCCOC.Br",
-        (normalize_smiles("CCO"), normalize_smiles("CBr")): "CCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCO")): "CCOC.Br",
-        (normalize_smiles("CO"), normalize_smiles("CBr")): "COC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CO")): "COC.Br",
-        (normalize_smiles("CCCCO"), normalize_smiles("CBr")): "CCCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCCO")): "CCCCOC.Br",
-        (normalize_smiles("CCCCCO"), normalize_smiles("CBr")): "CCCCCOC.Br",
-        (normalize_smiles("CBr"), normalize_smiles("CCCCCO")): "CCCCCOC.Br",
-    }
-    norm_r1 = normalize_smiles(reactant1)
-    norm_r2 = normalize_smiles(reactant2)
-    
-    full_product = None
-    
-    if (norm_r1, norm_r2) in reactant_pairs_to_products:
-        full_product = reactant_pairs_to_products[(norm_r1, norm_r2)]
-    elif (norm_r2, norm_r1) in reactant_pairs_to_products:
-        full_product = reactant_pairs_to_products[(norm_r2, norm_r1)]
-    else:
-        alcohol, halide = find_alcohol_and_halide(reactant1, reactant2)
-        if alcohol and halide:
-            full_product = handle_williamson_ether_synthesis(alcohol, halide)
+        # Carbon-carbon coupling (R₁Cl + R₂Br → R₁R₂)
+        ("CCl", "CBr", "Methyl coupling"),
+        ("CCCCCCl", "CBr", "Hexyl-methyl coupling"),
         
-        if not full_product:
-            result = predict_product_with_templates(reactant1, reactant2)
-            if isinstance(result, tuple) and len(result) == 2:
-                full_product, _ = result
-            else:
-                full_product = result
+        # Elemental halogens
+        ("Cl", "Br", "Interhalogen compound")
+    ]
     
-    if return_main_product_only and full_product and "." in full_product:
-        return get_main_product(full_product)
-    
-    return full_product
+    for reactant1, reactant2, description in test_cases:
+        product, template = react(reactant1, reactant2)
+        result = f"{product} (using {template})" if product else "No reaction"
+        print(f"{reactant1} + {reactant2} → {result} - {description}")

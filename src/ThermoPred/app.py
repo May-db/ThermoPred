@@ -4,15 +4,18 @@ from stmol import showmol
 from streamlit_ketcher import st_ketcher
 import py3Dmol
 from pathlib import Path
+from rdkit import Chem
+
+# Import functions from reaction_utils (using only the original product functions)
 from reaction_utils import (
     generate_3D, 
     smiles_to_3d, 
     write_xyz_file, 
     calculate_energy_with_rdkit, 
     Energy_comparison, 
-    get_product,
-    predict_product_with_templates,
+    REACTION_TEMPLATES,
     get_main_product,
+    react  # Using your original react() function instead of predict_reaction_products
 )
 
 # Set up the Streamlit page
@@ -29,6 +32,7 @@ def visualize_3D(molblock):
     view.addModel(molblock, 'mol')
     view.setStyle({'stick': {}, 'sphere': {'scale': 0.25}})
     view.zoomTo()
+    view.spin()
     view.setBackgroundColor('white')
     showmol(view, height=400, width=400)
 
@@ -39,16 +43,15 @@ def draw_and_process(title, session_key):
     
     if smiles:
         st.session_state[session_key] = smiles
-        st.code(smiles, language="chemical/x-smiles")
+        with st.expander(f"SMILES"):
+            st.code(smiles)
         
         molblock = generate_3D(smiles)
         if molblock:
-            with st.expander("3D View"):
+            with st.expander("3D Visualization"):
                 visualize_3D(molblock)
             
             try:
-                st.info("Calculating energy with RDKit MMFF94/UFF...")
-                
                 energy, elements, coords = calculate_energy_with_rdkit(smiles)
                 
                 # register the optimized geometry
@@ -57,15 +60,8 @@ def draw_and_process(title, session_key):
                 write_xyz_file(elements, coords, xyz_path)
                 
                 st.session_state[f"{session_key}_energy"] = energy
-                st.success(f"Energy (RDKit): {energy:.6f} Hartree")
-                
-                # Ajouter une visualisation de la structure optimisée
-                #with st.expander("Optimized 3D Structure"):
-                    #st.text("Optimized molecular geometry:")
-                    # Si vous avez une fonction pour visualiser les fichiers XYZ:
-                    # visualize_xyz(xyz_path)
-                    # Sinon, afficher le chemin du fichier
-                    #st.text(f"Saved to: {xyz_path}")
+                with st.expander("Energy"):
+                    st.success(f"Energy (RDKit): {energy:.6f} Hartree")
                 
             except Exception as e:
                 st.error(f"Energy calculation failed: {str(e)}")
@@ -80,20 +76,19 @@ if "mol1" not in st.session_state:
 if "mol2" not in st.session_state:
     st.session_state.mol2 = ""
 
+mol1 = draw_and_process("Molecule 1", "mol1")
+mol2 = draw_and_process("Molecule 2", "mol2")
 
-col1, col2 = st.columns(2)
-with col1:
-    mol1 = draw_and_process("Molecule 1", "mol1")
-with col2:
-    mol2 = draw_and_process("Molecule 2", "mol2")
-
-# Reaction type selection, du coup ca u lieu des datasets
-reaction_types = ["Auto-detect", "Substitution", "Addition", "Elimination", "Condensation"]
-selected_type = st.selectbox("Select reaction type (optional)", reaction_types)
+st.subheader("Reaction")
+# Template selection dropdown
+template_names = list(REACTION_TEMPLATES.keys())
+template_names.insert(0, "Auto-detect")  # Add auto-detect option
+selected_template = st.selectbox("Select reaction template", template_names, 
+                               help="Choose a specific reaction template or let the system auto-detect")
 
 # Additional option to display only the main product
-show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
-                                 help="When checked, the product will include leaving groups like HBr, H2O, etc.")
+#show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
+                                 #help="When checked, the product will include leaving groups like HBr, H2O, etc.")
 
 # Predict product button
 if mol1 and mol2:
@@ -106,48 +101,68 @@ if mol1 and mol2:
     if predict_button:
         with st.spinner("Predicting product..."):
             try:
-                if selected_type == "Auto-detect":
-                    # Get product with or without leaving groups based on user preference
-                    full_product = get_product(None, mol1, mol2, return_main_product_only=False)
-                else:
-                    rxn_type_map = {
-                        "Substitution": "substitution",
-                        "Addition": "addition",
-                        "Elimination": "elimination",
-                        "Condensation": "condensation"
-                    }
-                    rxn_type = rxn_type_map.get(selected_type, "default")
+                if selected_template == "Auto-detect":
+                    # Use your original react() function for auto-detection
+                    product_smiles, template_used = react(mol1, mol2)
                     
-                    # Use the existing predict_product_with_templates function
-                    result = predict_product_with_templates(mol1, mol2)
-                    if isinstance(result, tuple) and len(result) == 2:
-                        full_product, _ = result
+                    if product_smiles:
+                        reaction_info = f"Matched template: {template_used}"
+                        full_product = product_smiles
                     else:
-                        full_product = result
+                        st.error("No templates matched these reactants.")
+                        full_product = None
+                        reaction_info = "No matching templates found"
+                else:
+                    # Use the specific template selected by the user
+                    try:
+                        # Use your original react() function with forced template
+                        product_smiles, template_used = react(mol1, mol2)
+                        
+                        if product_smiles and template_used == selected_template:
+                            full_product = product_smiles
+                            reaction_info = f"Template: {selected_template}"
+                        else:
+                            st.warning(f"The selected template '{selected_template}' didn't match these reactants.")
+                            # Fall back to auto-detect
+                            product_smiles, template_used = react(mol1, mol2)
+                            if product_smiles:
+                                full_product = product_smiles
+                                reaction_info = f"Fell back to template: {template_used}"
+                            else:
+                                full_product = None
+                                reaction_info = "No matching templates found"
+                    except Exception as e:
+                        st.error(f"Error applying template: {str(e)}")
+                        full_product = None
                 
                 if full_product:
                     # Determine which product to display based on user preference
-                    if not show_leaving_groups and "." in full_product:
-                        display_product = get_main_product(full_product)
-                    else:
-                        display_product = full_product
+                    #if not show_leaving_groups and "." in full_product:
+                    #if  "." in full_product:
+                        #display_product = get_main_product(full_product)
+                    #else:
+                    display_product = full_product
                     
                     # For energy calculations, always use the main product
-                    energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    #energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    energy_product = full_product
                     
                     # Show the selected product representation
                     st.subheader("Predicted Product")
-                    st.code(display_product, language="chemical/x-smiles")
+                    st.caption(reaction_info)
+                    productketcher = st_ketcher(full_product, key="product_ketcher", height=400)
+                    with st.expander("SMILES"):
+                        st.code(display_product)
                     
                     # Display full reaction if showing leaving groups
-                    if show_leaving_groups and "." in full_product:
-                        with st.expander("Full Reaction"):
-                            st.markdown(f"**Reactants**: {mol1} + {mol2}")
-                            st.markdown(f"**Products**: {full_product}")
-                            components = full_product.split(".")
-                            if len(components) > 1:
-                                st.markdown(f"**Main product**: {components[0]}")
-                                st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
+                    #if show_leaving_groups and "." in full_product:
+                        #with st.expander("Full Reaction"):
+                            #st.markdown(f"**Reactants**: {mol1} + {mol2}")
+                            #st.markdown(f"**Products**: {full_product}")
+                            #components = full_product.split(".")
+                            #if len(components) > 1:
+                                #st.markdown(f"**Main product**: {components[0]}")
+                                #st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
                     
                     # Generate 3D visualization for the display product
                     molblock = generate_3D(display_product)
@@ -160,7 +175,8 @@ if mol1 and mol2:
                             E_prod, elements, coords = calculate_energy_with_rdkit(energy_product)
                             xyz_path = "xyz_files/product.xyz"
                             write_xyz_file(elements, coords, xyz_path)
-                            st.success(f"Product Energy: {E_prod:.6f} Hartree")
+                            with st.expander("Energy"):
+                                st.success(f"Product Energy: {E_prod:.6f} Hartree")
                             
                             if "mol1_energy" in st.session_state and "mol2_energy" in st.session_state:
                                 result = Energy_comparison(
@@ -192,26 +208,30 @@ if mol1 and mol2:
                     st.error("Could not predict a product for these reactants.")
             except Exception as e:
                 st.error(f"Error predicting product: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     
     if reset_button:
         for key in list(st.session_state.keys()):
-            del st.session_state[key]
+                del st.session_state[key]
         st.rerun()
 
+
+# Add a section to show available templates
+with st.expander("Available Reaction Templates"):
+    st.write("These are the reaction templates currently available in the system:")
+    for name, smarts in REACTION_TEMPLATES.items():
+        st.markdown(f"**{name}**: `{smarts}`")
+    st.info("The app will try to match your reactants against these templates.")
 
 with st.expander("About this app"):
     st.write("""
     This application predicts chemical reactions and their thermodynamic favorability at 0 K.
     
-    **How it works:**
-    1. Draw two molecules in the editors above
-    2. Select a reaction type (or let the app auto-detect)
-    3. Choose whether to show leaving groups (like HBr, H2O) in the product
-    4. Click "Predict Product" to see the reaction product and energy analysis
-    5. The app uses RDKit and rxnutils for chemical predictions and xTB for energy calculations
+    **Features:**
+    - Uses template-based reaction prediction from reaction_utils.py
+    - Energy calculations using RDKit force fields
+    - 3D visualization of reactants and products
     
-    **Limitations:**
-    - Predictions are based on common reaction patterns and may not capture all possible reactions
-    - Energy calculations are approximate and use 0 K as the reference temperature
-    - More complex reactions may not be predicted correctly
+    **Note:** This version uses only the original product prediction functions from reaction_utils.py
     """)

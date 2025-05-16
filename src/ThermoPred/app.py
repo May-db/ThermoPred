@@ -79,6 +79,7 @@ if "mol2" not in st.session_state:
 mol1 = draw_and_process("Molecule 1", "mol1")
 mol2 = draw_and_process("Molecule 2", "mol2")
 
+st.subheader("Reaction")
 # Template selection dropdown
 template_names = list(REACTION_TEMPLATES.keys())
 template_names.insert(0, "Auto-detect")  # Add auto-detect option
@@ -86,8 +87,8 @@ selected_template = st.selectbox("Select reaction template", template_names,
                                help="Choose a specific reaction template or let the system auto-detect")
 
 # Additional option to display only the main product
-show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
-                                 help="When checked, the product will include leaving groups like HBr, H2O, etc.")
+#show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
+                                 #help="When checked, the product will include leaving groups like HBr, H2O, etc.")
 
 # Predict product button
 if mol1 and mol2:
@@ -136,29 +137,32 @@ if mol1 and mol2:
                 
                 if full_product:
                     # Determine which product to display based on user preference
-                    if not show_leaving_groups and "." in full_product:
-                        display_product = get_main_product(full_product)
-                    else:
-                        display_product = full_product
+                    #if not show_leaving_groups and "." in full_product:
+                    #if  "." in full_product:
+                        #display_product = get_main_product(full_product)
+                    #else:
+                    display_product = full_product
                     
                     # For energy calculations, always use the main product
-                    energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    #energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    energy_product = full_product
                     
                     # Show the selected product representation
                     st.subheader("Predicted Product")
+                    st.caption(reaction_info)
+                    productketcher = st_ketcher(full_product, key="product_ketcher", height=400)
                     with st.expander("SMILES"):
                         st.code(display_product)
-                    st.caption(reaction_info)
                     
                     # Display full reaction if showing leaving groups
-                    if show_leaving_groups and "." in full_product:
-                        with st.expander("Full Reaction"):
-                            st.markdown(f"**Reactants**: {mol1} + {mol2}")
-                            st.markdown(f"**Products**: {full_product}")
-                            components = full_product.split(".")
-                            if len(components) > 1:
-                                st.markdown(f"**Main product**: {components[0]}")
-                                st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
+                    #if show_leaving_groups and "." in full_product:
+                        #with st.expander("Full Reaction"):
+                            #st.markdown(f"**Reactants**: {mol1} + {mol2}")
+                            #st.markdown(f"**Products**: {full_product}")
+                            #components = full_product.split(".")
+                            #if len(components) > 1:
+                                #st.markdown(f"**Main product**: {components[0]}")
+                                #st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
                     
                     # Generate 3D visualization for the display product
                     molblock = generate_3D(display_product)
@@ -209,8 +213,9 @@ if mol1 and mol2:
     
     if reset_button:
         for key in list(st.session_state.keys()):
-            del st.session_state[key]
+                del st.session_state[key]
         st.rerun()
+
 
 # Add a section to show available templates
 with st.expander("Available Reaction Templates"):

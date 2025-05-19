@@ -154,16 +154,6 @@ if mol1 and mol2:
                     with st.expander("SMILES"):
                         st.code(display_product)
                     
-                    # Display full reaction if showing leaving groups
-                    #if show_leaving_groups and "." in full_product:
-                        #with st.expander("Full Reaction"):
-                            #st.markdown(f"**Reactants**: {mol1} + {mol2}")
-                            #st.markdown(f"**Products**: {full_product}")
-                            #components = full_product.split(".")
-                            #if len(components) > 1:
-                                #st.markdown(f"**Main product**: {components[0]}")
-                                #st.markdown(f"**Leaving group(s)**: {'.'.join(components[1:])}")
-                    
                     # Generate 3D visualization for the display product
                     molblock = generate_3D(display_product)
                     if molblock:

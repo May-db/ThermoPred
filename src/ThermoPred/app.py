@@ -86,9 +86,6 @@ template_names.insert(0, "Auto-detect")  # Add auto-detect option
 selected_template = st.selectbox("Select reaction template", template_names, 
                                help="Choose a specific reaction template or let the system auto-detect")
 
-# Additional option to display only the main product
-#show_leaving_groups = st.checkbox("Show leaving groups in product", value=False, 
-                                 #help="When checked, the product will include leaving groups like HBr, H2O, etc.")
 
 # Predict product button
 if mol1 and mol2:
@@ -136,16 +133,14 @@ if mol1 and mol2:
                         full_product = None
                 
                 if full_product:
-                    # Determine which product to display based on user preference
-                    #if not show_leaving_groups and "." in full_product:
-                    #if  "." in full_product:
-                        #display_product = get_main_product(full_product)
-                    #else:
-                    display_product = full_product
+                    if  "." in full_product:
+                        display_product = get_main_product(full_product)
+                    else:
+                        display_product = full_product
                     
                     # For energy calculations, always use the main product
-                    #energy_product = get_main_product(full_product) if "." in full_product else full_product
-                    energy_product = full_product
+                    energy_product = get_main_product(full_product) if "." in full_product else full_product
+                    #energy_product = full_product
                     
                     # Show the selected product representation
                     st.subheader("Predicted Product")

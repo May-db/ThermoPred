@@ -27,7 +27,7 @@ st.caption("Draw two molecules to predict if the reaction is thermodynamically f
 os.makedirs("xyz_files", exist_ok=True)
 
 def visualize_3D(molblock):
-    """Create a 3D visualization of a molecule."""
+    """Given a molblock, the function generates a 3D visualization of the molecule."""
     view = py3Dmol.view(width=400, height=400)
     view.addModel(molblock, 'mol')
     view.setStyle({'stick': {}, 'sphere': {'scale': 0.25}})
@@ -37,7 +37,7 @@ def visualize_3D(molblock):
     showmol(view, height=400, width=400)
 
 def draw_and_process(title, session_key):
-    """Draw a molecule and calculate its energy."""
+    """By drawing a molecule in an interface ketcher, the function generates the SMILES, 3D visualization et enrgy of the molecule."""
     st.subheader(f"{title}")
     smiles = st_ketcher(st.session_state.get(session_key, ""), key=f"{session_key}_ketcher", height=400)
     

@@ -7,9 +7,11 @@ from rdkit.Chem import rdChemReactions
 
 # Utility functions
 def generate_3D(smiles):
+    """Converts a SMILES string into a 3D molecular structure in molblock format.
+    If the SMILES contains multiple fragments, only the main product is used.
+    Hydrogen atoms are added, and 3D coordinates are generated."""
     if "." in smiles:
-        smiles = get_main_product(smiles)
-        
+        smiles = get_main_product(smiles) 
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
@@ -22,6 +24,9 @@ def generate_3D(smiles):
 
 
 def smiles_to_3d(smiles, add_H=True, optimize=True, max_attempts=3):
+    """Converts a SMILES into 3D atomic coordinates and element symbols.
+    Adds hydrogens and performs geometry optimization using MMFF.
+    Includes multiple attempts to embed the molecule if needed."""
     if "." in smiles:
         smiles = get_main_product(smiles)
         
@@ -63,6 +68,8 @@ def smiles_to_3d(smiles, add_H=True, optimize=True, max_attempts=3):
 
 
 def write_xyz_file(elements, coordinates, filename):
+    """ Writes atomic elements and 3D coordinates to a .xyz file in standard XYZ format.
+    Creates the directory if it doesn't exist."""
     os.makedirs(os.path.dirname(filename), exist_ok=True)  
     with open(filename, 'w') as f:
         f.write(f"{len(elements)}\n\n")
@@ -152,6 +159,8 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
         raise ValueError(f"Error calculating energy: {str(e)}")
 
 def Energy_comparison(E1, E2, Ep):
+    """ Compares the energy of a product to the sum of two reactants and returns a stability assessment.
+    Returns 'stable', 'equilibrium', or 'unstable' based on the energy difference."""
     delta_E =  Ep - (E1 + E2)
     if delta_E < 0:
         return "stable"

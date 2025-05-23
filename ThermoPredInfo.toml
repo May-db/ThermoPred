@@ -5,6 +5,6 @@ build-backend = "hatchling.build"
 [project]
 name = "ThermoPred"
 version= "0.0.1"
-dependencies = ["rdkit","numpy==1.25","os","pyarrow"]
+dependencies = ["rdkit","numpy==1.25","os","pyarrow", "streamlit", "streamlit_ketcher", "stmol", "py3Dmol","pathlib", "pandas"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/ThermoPred"]

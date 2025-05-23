@@ -21,6 +21,9 @@ Supported reaction types include:
 * Streamlit, streamlit_ketcher, stmol, py3Dmol
 * numpy
 * pandas
+* os
+* pyarrow
+* pathlib
 
 ## Step 1: Environment Setup
 ```bash

@@ -12,4 +12,4 @@ __all__ = ['reaction_utils']
 
 # Package metadata
 __version__ = '0.1.0'
-__author__ = 'Maria'
+__author__ = 'Maria, Solene, May'

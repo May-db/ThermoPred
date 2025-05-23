@@ -161,7 +161,7 @@ def calculate_energy_with_rdkit(smiles, optimize_steps=500):
 def Energy_comparison(E1, E2, Ep):
     """ Compares the energy of a product to the sum of two reactants and returns a stability assessment.
     Returns 'stable', 'equilibrium', or 'unstable' based on the energy difference."""
-    delta_E =  Ep - (E1 + E2)
+    delta_E =  Ep - E1 - E2
     if delta_E < 0:
         return "stable"
     elif delta_E == 0:

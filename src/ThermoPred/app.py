@@ -10,7 +10,7 @@ from rdkit import Chem
 from reaction_utils import (
     generate_3D, 
     smiles_to_3d, 
-    write_xyz_file, 
+    write_xyz_file,
     calculate_energy_with_rdkit, 
     Energy_comparison, 
     REACTION_TEMPLATES,
@@ -173,7 +173,7 @@ if mol1 and mol2:
                                 st.subheader("Thermodynamic Analysis")
                                 E1 = st.session_state["mol1_energy"]
                                 E2 = st.session_state["mol2_energy"]
-                                delta_E = E1 + E2 - E_prod
+                                delta_E =  E_prod - E1 - E2
                                 
                                 col1, col2 = st.columns(2)
                                 with col1:

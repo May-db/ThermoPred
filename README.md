@@ -59,7 +59,7 @@ streamlit run app.py
 ```
 1. Draw you reactants molecules
 2. Choose a reaction template or use "Auto-detect"
-3. Click "Predict Product" to see the resulz and energy analysis
+3. Click "Predict Product" to see the result and energy analysis
 
 Tha application will be available at http://localhost:8501 by default
 
